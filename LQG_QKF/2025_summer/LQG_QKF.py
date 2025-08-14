@@ -3,13 +3,47 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from typing import Literal
 from tqdm import tqdm
 from stateDynamics import *
 from scipy.linalg import sqrtm
 import pickle as pkl
 
+
+# Set publication-ready plotting style
+plt.style.use('default')
+mpl.rcParams['font.family'] = 'serif'
+mpl.rcParams['font.serif'] = ['Times New Roman', 'DejaVu Serif', 'Computer Modern Roman']
+mpl.rcParams['font.size'] = 10
+mpl.rcParams['axes.titlesize'] = 12
+mpl.rcParams['axes.labelsize'] = 10
+mpl.rcParams['xtick.labelsize'] = 9
+mpl.rcParams['ytick.labelsize'] = 9
+mpl.rcParams['legend.fontsize'] = 9
+mpl.rcParams['figure.titlesize'] = 14
+mpl.rcParams['lines.linewidth'] = 2
+mpl.rcParams['axes.linewidth'] = 1.2
+mpl.rcParams['grid.linewidth'] = 0.8
+mpl.rcParams['grid.alpha'] = 0.3
+
+# Publication-ready color palette
+PUBLICATION_COLORS = {
+    'ekf': '#1f77b4',      # Blue
+    'ukf': '#2ca02c',      # Green  
+    'qkf': '#ff7f0e',      # Orange
+    'qkf_analytic': '#d62728',  # Red
+    'grid': '#e0e0e0',
+    'text': '#2f2f2f'
+}
+
 small_value = 1e-6  # Small value to prevent numerical issues
+
+pkl_dir = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/2025_summer/pkl/'
+os.makedirs(pkl_dir, exist_ok=True)
+
+perf_dir = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/2025_summer/perf/'
+os.makedirs(perf_dir, exist_ok=True)
 
 def generate_random_symmetric_matrix(size, scale=1.0):
     """"Generate a random symmetric positive definite matrix."""
@@ -86,7 +120,7 @@ def finite_horizon_lqr(A, B, Q, R, N=100, Qf=None):
     return P
 
 def update_lqr_one_step(A, B, Q, R, P):
-    # Compute the LQR gain
+    # Compute the LQG gain
     K = -np.linalg.pinv(R + B.T @ P @ B) @ B.T @ P @ A
     P_new = A.T @ P @ A - A.T @ P @ B @ K + Q + K.T @ R @ K  # update the cost-to-go matrix
     
@@ -204,7 +238,7 @@ class LQG:
         self.x_goal = goal_state
         self.Q = Q.astype(np.float64)
         self.R = R.astype(np.float64)
-        self.P_lqr = Q.copy()[:self.n, :self.n] # cost-to-go matrix for LQR
+        self.P_lqr = Q.copy()[:self.n, :self.n] # cost-to-go matrix for LQG
         
         # lqe
         self.P_est = np.eye(self.n) * small_value  # estimation error covariance matrix 
@@ -219,7 +253,7 @@ class LQG:
             'convergence_metrics': {}
         } 
     
-    # iLQR related
+    # iLQG related
     def get_A_hat(self, x, u):
         '''A_hat = d Z(t+1) / d x(t)'''
         I_n = np.eye(self.n) # shape (n, n)
@@ -350,7 +384,7 @@ class LQG:
         return
     
     def update_lqr_analytic(self, goal_state, infinite_horizon=False):
-        # LQR update only with augmented state
+        # LQG update only with augmented state
         I_p = np.eye(self.p)  # shape (p, p)
         I_p2 = np.eye(self.p ** 2)  # shape (p^2, p^2)
         I_n = np.eye(self.n) # shape (n, n)
@@ -383,7 +417,7 @@ class LQG:
         self.F.set_u(u_new)
 
     def update_lqr_orig(self, goal_state, ):
-        # LQR update only with original state, no augmented state
+        # LQG update only with original state, no augmented state
         # P_lqr = scipy.linalg.solve_discrete_are(self.A, self.B, self.Q[:self.n, :self.n], self.R)  # P is the fixed-point
         P_lqr = finite_horizon_lqr(self.A, self.B, self.Q[:self.n, :self.n], self.R, N=1, Qf=self.P_lqr)
         self.P_lqr = P_lqr.copy() # update cost-to-go matrix
@@ -394,7 +428,7 @@ class LQG:
         
     def update_lqr(self):
         if self.lqr_type == 'None':
-            # No LQR update, no control input
+            # No LQG update, no control input
             # self.F.set_u(np.ones((self.p, 1)))
             self.F.set_u(np.random.randn(self.p, 0))  # small random noise
             return 
@@ -735,11 +769,7 @@ def one_trial(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, r
     return [err_list_qkf, var_list_qkf], [err_list_ekf, var_list_ekf, cost_list_ekf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic], [err_list_ukf, var_list_ukf, cost_list_ukf]
 
 def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, rand_seed=None):
-    
     # Check if pkl files already exist
-    pkl_dir = 'pkl/'
-    os.makedirs(pkl_dir, exist_ok=True)
-    
     ekf_file = pkl_dir + f'ekf_results-mscale={int(m_scale)}.pkl'
     qkf_file = pkl_dir + f'qkf_results-mscale={int(m_scale)}.pkl'
     qkf_analytic_file = pkl_dir + f'qkf_analytic_results-mscale={int(m_scale)}.pkl'
@@ -842,7 +872,6 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
     # Only save pkl files if simulation was actually run
     if not skip_simulation:
-        pkl_dir = 'pkl/'
         os.makedirs(pkl_dir, exist_ok=True)
         with open(pkl_dir + f'ekf_results-mscale={int(m_scale)}.pkl', 'wb') as f:
             pkl.dump((np.array(err_list_ekf_all), np.array(var_list_ekf_all), np.array(cost_list_ekf_all)), f)
@@ -855,46 +884,61 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
     
     if plot:  
-        # plot estimation peformance comparison
-        fig, ax = plt.subplots(2, 1, figsize=(10, 6))
-        ax[0].set_title('Estimate error')
-        ax[0].set_xlabel('Time step')
-        ax[0].set_ylabel('Estimate error')
-        ax[1].set_title('Estimate variance')
-        ax[1].set_xlabel('Time step')   
-        ax[1].set_ylabel('Estimate variance')
+        # Plot estimation performance comparison with publication-ready styling
+        fig, ax = plt.subplots(2, 1, figsize=(8, 12))
+        fig.suptitle('Estimation Performance Comparison', fontsize=14, y=0.98, fontweight='bold')
         
-        ax[0].plot(err_list_ekf_avg, label='EKF error', color='blue')
-        ax[0].plot(err_list_ukf_avg, label='UKF error', color='green')
-        ax[0].plot(err_list_qkf_num_avg, label='QKF error', color='orange') 
-        ax[1].plot(var_list_ekf_avg, label='EKF variance', color='blue')
-        ax[1].plot(var_list_ukf_avg, label='UKF variance', color='green')
-        ax[1].plot(var_list_qkf_num_avg, label='QKF variance', color='orange')
-
-        ax[0].legend()
-        ax[1].legend()
-        ax[0].grid(True)
-        ax[1].grid(True)
+        # Error subplot
+        ax[0].set_title(f'Estimation Error, m_scale={int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
+        ax[0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
+        ax[0].set_ylabel('Mean Squared Error', fontsize=20, fontweight='bold')
+        ax[0].plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax[0].plot(err_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax[0].plot(err_list_qkf_num_avg, label='QKF', color=PUBLICATION_COLORS['qkf'], linewidth=2.5)
+        ax[0].legend(frameon=True, fancybox=True, shadow=True, loc='upper right')
+        ax[0].grid(True, alpha=0.3, linestyle='--')
+        ax[0].set_yscale('log')
+        
+        # Variance subplot
+        ax[1].set_title('Estimation Variance', fontsize=12, fontweight='bold', pad=15)
+        ax[1].set_xlabel('Time Step', fontsize=11, fontweight='bold')
+        ax[1].set_ylabel('Estimation Variance', fontsize=11, fontweight='bold')
+        ax[1].plot(var_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax[1].plot(var_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax[1].plot(var_list_qkf_num_avg, label='QKF', color=PUBLICATION_COLORS['qkf'], linewidth=2.5)
+        ax[1].legend(frameon=True, fancybox=True, shadow=True, loc='upper right')
+        ax[1].grid(True, alpha=0.3, linestyle='--')
+        ax[1].set_yscale('log')
+        
         plt.tight_layout()
-        plt.savefig('perf/estimation_performance.png')
+        plt.savefig(perf_dir + 'estimation_performance.png', dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
 
-        # plot cost performance comparison
-        plt.figure(figsize=(10, 6))
-        plt.title('Cost performance comparison')
-        plt.xlabel('Time step')
-        plt.ylabel('Cost')
-        plt.plot(cost_list_ekf_avg, label='LQR+EKF cost', color='blue')
-        plt.plot(cost_list_ukf_avg, label='LQR+UKF cost', color='green')
-        plt.plot(cost_list_qkf_num_avg, label='LQR+QKF cost', color='orange')
-        plt.legend()
-        plt.grid()
-        plt.savefig('perf/cost_performance.png')
+        # Plot cost performance comparison with publication-ready styling
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.set_title('Cost Performance Comparison', fontsize=20, fontweight='bold', pad=20)
+        ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
+        ax.set_ylabel('Cost-to-go (log scale)', fontsize=20, fontweight='bold')
+        
+        # Plot with enhanced styling
+        ax.plot(cost_list_ekf_avg, label='LQG+EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax.plot(cost_list_ukf_avg, label='LQG+UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax.plot(cost_list_qkf_num_avg, label='iLQG+QKF', color=PUBLICATION_COLORS['qkf'], linewidth=2.5)
+        
+        ax.legend(frameon=True, fancybox=True, shadow=True, loc='upper right', fontsize=11)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.set_yscale('log')
+        
+        # Enhance tick labels
+        ax.tick_params(axis='both', which='major', labelsize=10)
+        
+        plt.tight_layout()
+        plt.savefig(perf_dir + f'cost_perf-mscale={int(m_scale)}.png', dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         
-        # plot convergence comparison with improved detection
-        fig, axes = plt.subplots(2, 2, figsize=(18, 16))  # Increased figure size
-        fig.suptitle('Convergence Analysis', fontsize=16, y=0.98)  # Moved title up and increased font size
+        # Plot convergence comparison with publication-ready styling
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        # fig.suptitle('Convergence Analysis', fontsize=20, y=0.98, fontweight='bold')
         
         # Use improved convergence detection
         convergence_ekf = []
@@ -915,38 +959,47 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 1: Convergence times
         ax1 = axes[0, 0]
-        ax1.set_title('Time to Convergence', pad=25, fontsize=14)
+        ax1.set_title('Time to Convergence', pad=25, fontsize=20, fontweight='bold')
         
-        # Plot convergence times
+        # Plot convergence times with enhanced styling
         trials_range = range(trials)
-        ax1.plot(trials_range, convergence_ekf, label='LQR+EKF', marker='o', alpha=0.7, color='blue')
-        ax1.plot(trials_range, convergence_ukf, label='LQR+UKF', marker='d', alpha=0.7, color='green')
-        ax1.plot(trials_range, convergence_qkf_num, label='LQR+QKF', marker='s', alpha=0.7, color='orange')
-        ax1.set_xlabel('Trial', fontsize=12)
-        ax1.set_ylabel('Convergence Time (steps)', fontsize=12)
-        ax1.legend(fontsize=10)
-        ax1.grid(True, alpha=0.3)
+        ax1.plot(trials_range, convergence_ekf, label='LQG+EKF', marker='o', markersize=6, alpha=0.8, 
+                color=PUBLICATION_COLORS['ekf'], linewidth=2, markeredgecolor='white', markeredgewidth=1)
+        ax1.plot(trials_range, convergence_ukf, label='LQG+UKF', marker='d', markersize=6, alpha=0.8, 
+                color=PUBLICATION_COLORS['ukf'], linewidth=2, markeredgecolor='white', markeredgewidth=1)
+        ax1.plot(trials_range, convergence_qkf_num, label='iLQG+QKF', marker='s', markersize=6, alpha=0.8, 
+                color=PUBLICATION_COLORS['qkf'], linewidth=2, markeredgecolor='white', markeredgewidth=1)
+        ax1.set_xlabel('Trial', fontsize=20, fontweight='bold')
+        ax1.set_ylabel('Convergence Time (steps)', fontsize=20, fontweight='bold')
+        ax1.legend(frameon=True, fancybox=True, shadow=True, fontsize=10)
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.tick_params(axis='both', which='major', labelsize=9)
         
         # Subplot 2: Convergence statistics
         ax2 = axes[0, 1]
-        ax2.set_title('Convergence Statistics', pad=25, fontsize=14)
-        methods = ['LQR+EKF', 'LQR+UKF', 'LQR+QKF']
+        ax2.set_title('Convergence Statistics', pad=25, fontsize=20, fontweight='bold')
+        methods = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF']
         avg_conv_times = [np.mean(convergence_ekf), np.mean(convergence_ukf), np.mean(convergence_qkf_num)]
         std_conv_times = [np.std(convergence_ekf), np.std(convergence_ukf), np.std(convergence_qkf_num)]
         
-        bars = ax2.bar(methods, avg_conv_times, yerr=std_conv_times, capsize=5, alpha=0.7)
-        ax2.set_ylabel('Average Convergence Time', fontsize=12)
+        # Enhanced bar plot with better colors and styling
+        colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf']]
+        bars = ax2.bar(methods, avg_conv_times, yerr=std_conv_times, capsize=8, alpha=0.8, 
+                       color=colors, edgecolor='black', linewidth=1)
+        ax2.set_ylabel('Average Convergence Time (steps)', fontsize=20, fontweight='bold')
         ax2.tick_params(axis='x', rotation=45, labelsize=10)
-        ax2.grid(True, alpha=0.3)
+        ax2.grid(True, alpha=0.3, linestyle='--', axis='y')
         
-        # Add value labels on bars with better positioning
-        for bar, avg_time in zip(bars, avg_conv_times):
-            ax2.text(bar.get_x() + bar.get_width()/2 + bar.get_width()*0.3, bar.get_height() + max(std_conv_times) * 0.15, 
-                    f'{avg_time:.0f}', ha='center', va='bottom', fontsize=10)
+        # Add value labels on bars with better positioning and styling
+        for bar, avg_time, std_time in zip(bars, avg_conv_times, std_conv_times):
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + std_time + max(std_conv_times) * 0.1, 
+                    f'{avg_time:.0f}±{std_time:.0f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+        
+        ax2.tick_params(axis='both', which='major', labelsize=9)
         
         # Subplot 3: Convergence rate (percentage converged vs time)
         ax3 = axes[1, 0]
-        ax3.set_title('Convergence Rate Over Time', pad=25, fontsize=14)
+        ax3.set_title('Convergence Rate Over Time', pad=25, fontsize=20, fontweight='bold')
         time_steps = np.arange(0, H, 10)
         
         ekf_conv_rate = []
@@ -958,17 +1011,20 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
             qkf_num_conv_rate.append(np.sum(np.array(convergence_qkf_num) <= t) / trials * 100)
             ukf_conv_rate.append(np.sum(np.array(convergence_ukf) <= t) / trials * 100)
         
-        ax3.plot(time_steps, ekf_conv_rate, label='LQR+EKF', linewidth=2, color='blue')
-        ax3.plot(time_steps, ukf_conv_rate, label='LQR+UKF', linewidth=2, color='green')
-        ax3.plot(time_steps, qkf_num_conv_rate, label='LQR+QKF', linewidth=2, color='orange')
-        ax3.set_xlabel('Time Steps', fontsize=12)
-        ax3.set_ylabel('Convergence Rate (%)', fontsize=12)
-        ax3.legend(fontsize=10)
-        ax3.grid(True, alpha=0.3)
+        # Enhanced line plots with better styling
+        ax3.plot(time_steps, ekf_conv_rate, label='LQG+EKF', linewidth=3, color=PUBLICATION_COLORS['ekf'], marker='o', markersize=4)
+        ax3.plot(time_steps, ukf_conv_rate, label='LQG+UKF', linewidth=3, color=PUBLICATION_COLORS['ukf'], marker='s', markersize=4)
+        ax3.plot(time_steps, qkf_num_conv_rate, label='iLQG+QKF', linewidth=3, color=PUBLICATION_COLORS['qkf'], marker='^', markersize=4)
+        ax3.set_xlabel('Time Steps', fontsize=20, fontweight='bold')
+        ax3.set_ylabel('Convergence Rate (%)', fontsize=20, fontweight='bold')
+        ax3.legend(frameon=True, fancybox=True, shadow=True, fontsize=10)
+        ax3.grid(True, alpha=0.3, linestyle='--')
+        ax3.set_ylim(0, 105)
+        ax3.tick_params(axis='both', which='major', labelsize=9)
         
         # Subplot 4: Final convergence status
         ax4 = axes[1, 1]
-        ax4.set_title('Final Convergence Status', pad=25, fontsize=14)
+        ax4.set_title('Final Convergence Status', pad=25, fontsize=20, fontweight='bold')
         conv_counts = [
             np.sum(np.array(convergence_ekf) < H),
             np.sum(np.array(convergence_ukf) < H),
@@ -977,30 +1033,34 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         ]
         conv_percentages = [count/trials*100 for count in conv_counts]
         
-        bars = ax4.bar(methods, conv_percentages, alpha=0.7, color=['blue', 'green', 'orange'])
-        ax4.set_ylabel('Convergence Rate (%)', fontsize=12)
+        # Enhanced bar plot with better styling
+        colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf']]
+        bars = ax4.bar(methods, conv_percentages, alpha=0.8, color=colors, edgecolor='black', linewidth=1)
+        ax4.set_ylabel('Convergence Rate (%)', fontsize=20, fontweight='bold')
         ax4.tick_params(axis='x', rotation=45, labelsize=10)
-        ax4.set_ylim(0, 100)
-        ax4.grid(True, alpha=0.3)
+        ax4.set_ylim(0, 105)
+        ax4.grid(True, alpha=0.3, linestyle='--', axis='y')
         
-        # Add percentage labels with better positioning
+        # Add percentage labels with better positioning and styling
         for bar, pct in zip(bars, conv_percentages):
-            ax4.text(bar.get_x() + bar.get_width()/2 + bar.get_width()*0.3, bar.get_height() + 3, 
-                    f'{pct:.1f}%', ha='center', va='bottom', fontsize=10)
+            ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2, 
+                    f'{pct:.1f}%', ha='center', va='bottom', fontsize=9, fontweight='bold')
+        
+        ax4.tick_params(axis='both', which='major', labelsize=9)
         
         # Adjust layout to prevent overlap
         plt.subplots_adjust(top=0.92, bottom=0.12, left=0.1, right=0.95, hspace=0.35, wspace=0.3)
-        plt.savefig('perf/convergence_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(perf_dir + 'convergence_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         
         # Print summary statistics
         print(f"\n=== Convergence Analysis Summary ===")
         print(f"Tolerance used: {tolerance:.2e}")
-        print(f"LQR+EKF - Avg convergence time: {np.mean(convergence_ekf):.1f} ± {np.std(convergence_ekf):.1f}")
-        print(f"LQR+UKF - Avg convergence time: {np.mean(convergence_ukf):.1f} ± {np.std(convergence_ukf):.1f}")
-        print(f"LQR+QKF - Avg convergence time: {np.mean(convergence_qkf_num):.1f} ± {np.std(convergence_qkf_num):.1f}")
+        print(f"LQG+EKF - Avg convergence time: {np.mean(convergence_ekf):.1f} ± {np.std(convergence_ekf):.1f}")
+        print(f"LQG+UKF - Avg convergence time: {np.mean(convergence_ukf):.1f} ± {np.std(convergence_ukf):.1f}")
+        print(f"iLQG+QKF - Avg convergence time: {np.mean(convergence_qkf_num):.1f} ± {np.std(convergence_qkf_num):.1f}")
         # print(f"Analytic QKF - Avg convergence time: {np.mean(convergence_qkf_analytic):.1f} ± {np.std(convergence_qkf_analytic):.1f}")
-        print(f"Convergence rates: LQR+EKF {conv_percentages[0]:.1f}%, LQR+UKF {conv_percentages[1]:.1f}%, LQR+QKF {conv_percentages[2]:.1f}%")
+        print(f"Convergence rates: LQG+EKF {conv_percentages[0]:.1f}%, LQG+UKF {conv_percentages[1]:.1f}%, iLQG+QKF {conv_percentages[2]:.1f}%")
 
     # return cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_ukf_avg
     return cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_ukf_avg
@@ -1008,16 +1068,74 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 def nonlinearity_test(H=1000, trials=20):
     m_scales = [0, 1, 1e1, 1e2, 1e3, 1e4]
     rand_seed = 100  # use the same base for all m_scales
+    
+    # Store results for plotting
+    all_results = {
+        'm_scales': m_scales,
+        'ekf_costs': [],
+        'ukf_costs': [],
+        'qkf_costs': []
+    }
+    
     for i, m_scale in enumerate(m_scales):
         print(f"Testing with m_scale={m_scale}")
-        # cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_ukf_avg = test(H=H, trials=trials, plot=False, m_scale=m_scale, rand_seed=rand_seed)
         cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_ukf_avg = test(H=H, trials=trials, plot=False, m_scale=m_scale, rand_seed=rand_seed)
+        
+        # Store average final costs for comparison
+        all_results['ekf_costs'].append(np.mean(cost_list_ekf_avg[-100:]))  # Last 100 steps average
+        all_results['ukf_costs'].append(np.mean(cost_list_ukf_avg[-100:]))
+        all_results['qkf_costs'].append(np.mean(cost_list_qkf_num_avg[-100:]))
+    
+    # Plot nonlinearity analysis results
+    plot_nonlinearity_analysis(all_results)
+    
+    return all_results
+
+
+def plot_nonlinearity_analysis(results):
+    """
+    Create publication-ready plots for nonlinearity analysis.
+    
+    Args:
+        results: Dictionary containing m_scales and cost data for each method
+    """
+    # Create figure with publication-ready styling
+    fig, ax = plt.subplots(figsize=(8, 6))
+    # Subplot 2: Cost vs Nonlinearity (log scale for better visualization)
+    ax.set_title('Cost Performance vs. Nonlinearity', fontsize=20, fontweight='bold', pad=15)
+    ax.set_xlabel('Nonlinearity Scale (m_scale)', fontsize=20, fontweight='bold')
+    ax.set_ylabel('Average Final Cost', fontsize=20, fontweight='bold')
+    
+    # Plot with enhanced styling
+    ax.loglog(results['m_scales'], results['ekf_costs'],  
+               label='LQG+EKF', color=PUBLICATION_COLORS['ekf'], 
+               marker='o', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    ax.loglog(results['m_scales'], results['ukf_costs'], 
+               label='LQG+UKF', color=PUBLICATION_COLORS['ukf'], 
+               marker='s', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    ax.loglog(results['m_scales'], results['qkf_costs'], 
+               label='iLQG+QKF', color=PUBLICATION_COLORS['qkf'], 
+               marker='^', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=11)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.tick_params(axis='both', which='major', labelsize=10)
+    
+    # Adjust layout and save
+    plt.tight_layout()
+    plt.savefig(perf_dir + 'nonlinearity_analysis.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"\n=== Nonlinearity Analysis Summary ===")
+    print(f"Nonlinearity scales tested: {results['m_scales']}")
+    print(f"EKF final costs: {[f'{cost:.2e}' for cost in results['ekf_costs']]}")
+    print(f"UKF final costs: {[f'{cost:.2e}' for cost in results['ukf_costs']]}")
+    print(f"QKF final costs: {[f'{cost:.2e}' for cost in results['qkf_costs']]}")
 
 
 if __name__ == "__main__":
-    os.makedirs('perf', exist_ok=True)
-    # test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    nonlinearity_test(H=1000, trials=20)
+    test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    nonlinearity_test(H=1000, trials=10)
         
 
 
