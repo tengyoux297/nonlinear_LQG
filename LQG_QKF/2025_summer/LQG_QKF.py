@@ -1016,8 +1016,8 @@ def nonlinearity_test(H=1000, trials=20):
 
 if __name__ == "__main__":
     os.makedirs('perf', exist_ok=True)
-    test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    # nonlinearity_test(H=1000, trials=10)
+    # test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    nonlinearity_test(H=1000, trials=20)
         
 
 
