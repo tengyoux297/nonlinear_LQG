@@ -39,10 +39,10 @@ PUBLICATION_COLORS = {
 
 small_value = 1e-6  # Small value to prevent numerical issues
 
-pkl_dir = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/2025_summer/pkl/'
+pkl_dir = 'LQG_QKF/2025_summer/pkl/'
 os.makedirs(pkl_dir, exist_ok=True)
 
-perf_dir = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/2025_summer/perf/'
+perf_dir = 'LQG_QKF/2025_summer/perf/'
 os.makedirs(perf_dir, exist_ok=True)
 
 def generate_random_symmetric_matrix(size, scale=1.0):
