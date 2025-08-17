@@ -889,7 +889,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         fig.suptitle('Estimation Performance Comparison', fontsize=14, y=0.98, fontweight='bold')
         
         # Error subplot
-        ax[0].set_title(f'Estimation Error, m_scale={int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
+        ax[0].set_title(f'Estimation Error, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
         ax[0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
         ax[0].set_ylabel('Mean Squared Error', fontsize=20, fontweight='bold')
         ax[0].plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
@@ -916,7 +916,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
         # Plot cost performance comparison with publication-ready styling
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.set_title('Cost Performance Comparison', fontsize=20, fontweight='bold', pad=20)
+        ax.set_title(f'Cost Performance Comparison, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
         ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
         ax.set_ylabel('Cost-to-go (log scale)', fontsize=20, fontweight='bold')
         
@@ -959,8 +959,8 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 1: Convergence times
         ax1 = axes[0, 0]
-        ax1.set_title('Time to Convergence', pad=25, fontsize=20, fontweight='bold')
-        
+        ax1.set_title(f'Time to Convergence, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
+
         # Plot convergence times with enhanced styling
         trials_range = range(trials)
         ax1.plot(trials_range, convergence_ekf, label='LQG+EKF', marker='o', markersize=6, alpha=0.8, 
@@ -977,7 +977,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 2: Convergence statistics
         ax2 = axes[0, 1]
-        ax2.set_title('Convergence Statistics', pad=25, fontsize=20, fontweight='bold')
+        ax2.set_title(f'Average Convergence Time, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
         methods = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF']
         avg_conv_times = [np.mean(convergence_ekf), np.mean(convergence_ukf), np.mean(convergence_qkf_num)]
         std_conv_times = [np.std(convergence_ekf), np.std(convergence_ukf), np.std(convergence_qkf_num)]
@@ -999,7 +999,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 3: Convergence rate (percentage converged vs time)
         ax3 = axes[1, 0]
-        ax3.set_title('Convergence Rate Over Time', pad=25, fontsize=20, fontweight='bold')
+        ax3.set_title(f'Convergence Rate Over Time, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
         time_steps = np.arange(0, H, 10)
         
         ekf_conv_rate = []
@@ -1024,7 +1024,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 4: Final convergence status
         ax4 = axes[1, 1]
-        ax4.set_title('Final Convergence Status', pad=25, fontsize=20, fontweight='bold')
+        ax4.set_title(f'Convergence Rate, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
         conv_counts = [
             np.sum(np.array(convergence_ekf) < H),
             np.sum(np.array(convergence_ukf) < H),
@@ -1135,7 +1135,7 @@ def plot_nonlinearity_analysis(results):
 
 if __name__ == "__main__":
     test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    nonlinearity_test(H=1000, trials=10)
+    # nonlinearity_test(H=1000, trials=10)
         
 
 
