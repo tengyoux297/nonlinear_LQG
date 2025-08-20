@@ -390,7 +390,16 @@ class LQG:
         I_n = np.eye(self.n) # shape (n, n)
         B = self.F.get_B()  # shape (n, p)
         A = self.F.get_A()  # shape (n, n)
-        x = self.F.get_x()  # shape (n, 1), current state vector
+        
+        
+        # to be checked
+        ####################################################
+        x_actual = self.F.get_x()  # shape (n, 1), current state vector
+        x = x_actual - goal_state # shape (n, 1)
+        
+        x_estimated = self.x_hat
+        x_tilde = x_estimated - x_actual # shape (n, 1)
+        ####################################################
         
         # commutation matrix for I_p kron u
         T = np.zeros((self.p * self.p, self.p * self.p)) # shape (p^2, p^2)
@@ -412,7 +421,8 @@ class LQG:
             term2 = term1 @ q @ e_i.T  # shape (p, p)
             S += term2  # accumulate over p columns
 
-        Z = np.kron(A, B) @ np.kron(x, I_p)  + np.kron(B, A) @ np.kron(I_p, x) # shape (n^2, p)
+        # Z = np.kron(A, B) @ np.kron(x, I_p)   + np.kron(B, A) @ np.kron(I_p, x) # shape (n^2, p)
+        Z = np.kron(B, A @ x) + np.kron(A @ x, B) + np.kron(B, A @ x_tilde) + np.kron(A @ x_tilde, B)
         u_new = -np.linalg.inv(S + 2 * self.R) @ Z.T @ q # shape (p, 1)
         self.F.set_u(u_new)
 
