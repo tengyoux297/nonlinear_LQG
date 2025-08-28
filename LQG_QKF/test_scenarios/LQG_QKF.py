@@ -436,7 +436,7 @@ class LQG_PathTracking:
             'convergence_step': None,
             'convergence_metrics': {}
         }
-        self.divergence_threshold = 1e6
+        self.divergence_threshold = 1e2
         self.is_diverged = False
         self.divergence_step = None
 
@@ -587,7 +587,6 @@ class LQG_PathTracking:
         A = self.F.get_A()  # shape (n, n)
         
         
-        # to be checked
         ####################################################
         x_actual = self.F.get_x()  # shape (n, 1), current state vector
         x = x_actual - goal_state # shape (n, 1)
@@ -655,7 +654,7 @@ class LQG_PathTracking:
         if self.lqr_type == 'None':
             # No LQR update, no control input
             # self.F.set_u(np.ones((self.p, 1)))
-            self.F.set_u(np.random.randn(self.p, 0))  # small random noise
+            self.F.set_u(np.random.randn(self.p, 1))  # small random noise
             return 
         else:
             goal_state = self.x_goal
@@ -833,7 +832,7 @@ class LQG_PathTracking:
             # Add stronger regularization for numerical stability
             S_reg = S + np.eye(S.shape[0]) * 1e-3
             # Use lstsq for more robust computation
-            K = np.linalg.lstsq(S_reg.T, C_tilde.T, rcond=1e-3)[0].T
+            K = np.linalg.lstsq(S_reg.T, C_tilde.T, rcond=1e-6)[0].T
         except np.linalg.LinAlgError:
             # Ultimate fallback: use identity gain (no correction)
             raise ValueError("UKF Kalman gain computation failed")
@@ -1155,14 +1154,38 @@ class LQG_PathTracking:
                 # keep running to fill horizon
 
         # Cost-to-go
-        cost_to_go_list, acc = [], 0.0
-        for c in reversed(cost_list):
-            acc += c
-            cost_to_go_list.append(acc)
-        cost_to_go_list.reverse()
+        cost_to_go_list = []
+        
+        # Check if divergence occurred
+        if self.is_diverged and self.divergence_step is not None and self.divergence_step > 0:
+            # Calculate cost-to-go for the entire horizon, but with special handling for diverged portion
+            
+            # First, calculate cost-to-go normally for the entire list
+            acc = 0.0
+            temp_cost_to_go = []
+            for c in reversed(cost_list):
+                acc += c
+                temp_cost_to_go.append(acc)
+            temp_cost_to_go.reverse()
+            
+            # Now modify the diverged portion to be horizontal
+            # The cost-to-go at divergence step should remain constant afterwards
+            divergence_cost_to_go = temp_cost_to_go[self.divergence_step - 1] if self.divergence_step > 0 else temp_cost_to_go[0]
+            
+            cost_to_go_list = temp_cost_to_go.copy()
+            # Make the cost-to-go horizontal from divergence point onwards
+            for i in range(self.divergence_step, len(cost_to_go_list)):
+                cost_to_go_list[i] = divergence_cost_to_go
+        else:
+            # No divergence, calculate normally
+            acc = 0.0
+            for c in reversed(cost_list):
+                acc += c
+                cost_to_go_list.append(acc)
+            cost_to_go_list.reverse()
 
         return rmse_list, var_list, cost_to_go_list, tracking_error_list, trajectory_x, trajectory_y, ref_traj_x, ref_traj_y
- 
+
 def main():
     # --- reproducibility ---
     np.random.seed(0)
@@ -1172,7 +1195,7 @@ def main():
     n1, n2, p, m = 2, 2, 3, 2     # [x,y] + [vx,vy], 3 inputs, 2 measurements
     n = n1 + n2
     path_type = 'figure8'
-    num_points = 1500
+    num_points = 200              
     H = num_points                # horizon = length of reference
 
     # --- reference path ---
@@ -1180,101 +1203,135 @@ def main():
 
     # --- dynamics / sensor ---
     A_E, A_S, B_S, W = create_vehicle_dynamics_matrices(dt=dt, process_noise_scale=0.01)
-    C, M, V = create_sensor_matrices_for_tracking(n=n, m=m, measurement_noise_scale=0.05, nonlinearity_scale=0.2)
+    C, M, V = create_sensor_matrices_for_tracking(n=n, m=m, measurement_noise_scale=0.05, nonlinearity_scale=1e-1)
 
     # --- costs ---
-    # State block (x, y, vx, vy)
     Q_scale = 1e-2
     Q = generate_random_symmetric_matrix(n+n**2, scale=Q_scale)
-    Q[:n, :n] *= 1e2 # position >> velocity
-    
-    # Input cost
+    Q[:n, :n] *= 1e2   # position >> velocity
     R_scale = 1e-2
     R = generate_random_symmetric_matrix(p, scale=R_scale)
 
     goal_state = np.zeros((n, 1))  # unused in tracking except as a default
 
-    # --- controller ---
-    lqg = LQG_PathTracking(
+    # --- controller A: QKF + Aug-LQR-Analytic ---
+    lqg_A = LQG_PathTracking(
         n1, n2, p, W, A_E, A_S, B_S,
         C, M, V, Q, R,
         goal_state=goal_state,
         H=H,
-        filter_type='qkf',          # qkf | ekf | kf | ukf
-        lqr_type='aug_analytic',            # orig | aug_numeric | aug_analytic | None
+        filter_type='qkf',
+        lqr_type='aug_analytic',
         reference_path=ref,
         dt=dt
     )
+    rmse_A, var_A, J_A, err_A, x_A, y_A, rx_A, ry_A = lqg_A.run_sim()
+    u_A = list(lqg_A.convergence_history["control_effort"].copy())
 
-    # --- run ---
-    rmse, var, J_to_go, track_err, traj_x, traj_y, ref_traj_x, ref_traj_y = lqg.run_sim()
-    control_effort = list(lqg.convergence_history["control_effort"].copy())
+    # --- controller B (baseline): QKF + Aug-iLQR-Numeric ---
+    lqg_B = LQG_PathTracking(
+        n1, n2, p, W, A_E, A_S, B_S,
+        C, M, V, Q, R,
+        goal_state=goal_state,
+        H=H,
+        filter_type='qkf',
+        lqr_type='aug_numeric',
+        reference_path=ref,
+        dt=dt
+    )
+    rmse_B, var_B, J_B, err_B, x_B, y_B, rx_B, ry_B = lqg_B.run_sim()
+    u_B = list(lqg_B.convergence_history["control_effort"].copy())
+
+    # --- controller C (baseline): EKF + orig LQR ---
+    lqg_C = LQG_PathTracking(
+        n1, n2, p, W, A_E, A_S, B_S,
+        C, M, V, Q, R,
+        goal_state=goal_state,
+        H=H,
+        filter_type='ekf',
+        lqr_type='orig',
+        reference_path=ref,
+        dt=dt
+    )
+    rmse_C, var_C, J_C, err_C, x_C, y_C, rx_C, ry_C = lqg_C.run_sim()
+    u_C = list(lqg_C.convergence_history["control_effort"].copy())
     
-    # if ended early due to divergence, pad the results with None
-    if len(control_effort) < H:
-        control_effort.extend([None] * (H - len(control_effort)))
-        
-    if len(rmse) < H:
-        rmse.extend([None] * (H - len(rmse)))
-        var.extend([None] * (H - len(var)))
-        J_to_go.extend([None] * (H - len(J_to_go)))
-        track_err.extend([None] * (H - len(track_err)))
-        traj_x.extend([None] * (H - len(traj_x)))
-        traj_y.extend([None] * (H - len(traj_y)))
-        ref_traj_x.extend([None] * (H - len(ref_traj_x)))
-        ref_traj_y.extend([None] * (H - len(ref_traj_y)))
-        
+    # --- controller D (baseline): UKF + orig LQR ---
+    lqg_D = LQG_PathTracking(
+        n1, n2, p, W, A_E, A_S, B_S,
+        C, M, V, Q, R,
+        goal_state=goal_state,
+        H=H,
+        filter_type='ukf',
+        lqr_type='orig',
+        reference_path=ref,
+        dt=dt
+    )
+    rmse_D, var_D, J_D, err_D, x_D, y_D, rx_D, ry_D = lqg_D.run_sim()
+    u_D = list(lqg_D.convergence_history["control_effort"].copy())
+    
+    
+    # --- pad to H if any run diverged early ---
+    def pad_to_H(lst, H):
+        if len(lst) < H:
+            lst.extend([None] * (H - len(lst)))
+        return lst
 
-    # --- pack results & save ---
+    for series in [u_A, rmse_A, var_A, J_A, err_A, x_A, y_A, rx_A, ry_A,
+                   u_B, rmse_B, var_B, J_B, err_B, x_B, y_B, rx_B, ry_B,
+                   u_C, rmse_C, var_C, J_C, err_C, x_C, y_C, rx_C, ry_C,
+                   u_D, rmse_D, var_D, J_D, err_D, x_D, y_D, rx_D, ry_D]:
+        pad_to_H(series, H)
+
+    # --- pack & save results (all four controllers) ---
     results = {
-        "rmse": rmse,
-        "var": var,
-        "J_to_go": J_to_go,
-        "track_err": track_err,
-        "traj_x": traj_x,
-        "traj_y": traj_y,
-        "ref_traj_x": ref_traj_x,
-        "ref_traj_y": ref_traj_y,
-        "control_effort": control_effort,
-        "ref": ref,
-        "dt": dt,
-        "path_type": path_type
+        "ref": ref, "dt": dt, "path_type": path_type,
+        "A": {"label": "QKF + Aug-LQR-Analytic", "rmse": rmse_A, "var": var_A, "J_to_go": J_A,
+              "track_err": err_A, "traj_x": x_A, "traj_y": y_A, "ref_traj_x": rx_A, "ref_traj_y": ry_A, "u_norm": u_A},
+        "B": {"label": "QKF + Aug-iLQR-Numeric", "rmse": rmse_B, "var": var_B, "J_to_go": J_B,
+              "track_err": err_B, "traj_x": x_B, "traj_y": y_B, "ref_traj_x": rx_B, "ref_traj_y": ry_B, "u_norm": u_B},
+        "C": {"label": "EKF + Orig-LQR", "rmse": rmse_C, "var": var_C, "J_to_go": J_C,
+              "track_err": err_C, "traj_x": x_C, "traj_y": y_C, "ref_traj_x": rx_C, "ref_traj_y": ry_C, "u_norm": u_C},
+        "D": {"label": "UKF + Orig-LQR", "rmse": rmse_D, "var": var_D, "J_to_go": J_D,
+              "track_err": err_D, "traj_x": x_D, "traj_y": y_D, "ref_traj_x": rx_D, "ref_traj_y": ry_D, "u_norm": u_D},
     }
 
-    # timestamped filenames
     import datetime as _dt
     stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    pkl_path = os.path.join(pkl_dir, f"tracking_{path_type}_{stamp}.pkl")
+    pkl_path = os.path.join(pkl_dir, f"tracking_{path_type}_all_controllers_{stamp}.pkl")
     with open(pkl_path, "wb") as f:
         pkl.dump(results, f)
 
     # --- plots ---
-    T = np.arange(len(rmse)) * dt
-    fig = plt.figure(figsize=(14, 10))
+    T = np.arange(H) * dt
+    fig = plt.figure(figsize=(15, 10))
     gs = fig.add_gridspec(2, 3, hspace=0.35, wspace=0.28)
 
-   # 1) XY path
+    # Define consistent colors for each controller
+    colors = {
+        "A": "#1f77b4",  # Blue for QKF + Aug-LQR-Analytic
+        "B": "#ff7f0e",  # Orange for QKF + Aug-iLQR-Numeric  
+        "C": "#2ca02c",  # Green for EKF + Orig-LQR
+        "D": "#d62728"   # Red for UKF + Orig-LQR
+    }
+
+    # 1) XY path
     ax1 = fig.add_subplot(gs[0, 0])
+    ax1.plot(ref['x'], ref['y'], '--', lw=1.2, alpha=0.7, label="Reference (global)", color='gray')
 
-    # Convert lists (with possible None) to clean arrays for plotting
-    rX = np.array(ref_traj_x, dtype=float)
-    rY = np.array(ref_traj_y, dtype=float)
-    tX = np.array(traj_x, dtype=float)
-    tY = np.array(traj_y, dtype=float)
-
-    # Plot the full global reference path you generated
-    ax1.plot(ref['x'], ref['y'], '--', lw=1.5, alpha=0.7, label="Reference (global)")
-
-    # Plot the lookahead/blended reference actually fed to the controller each step
-    ax1.plot(rX, rY, ':', lw=2.0, label="Lookahead goal (used)")
-
-    # Plot the actual trajectory
-    ax1.plot(tX, tY, '-', lw=2.0, label="Trajectory")
-
-    # (optional) mark starts
-    ax1.plot(ref['x'][0], ref['y'][0], 'o', ms=6, label="Ref start")
-    if np.isfinite(tX[0]) and np.isfinite(tY[0]):
-        ax1.plot(tX[0], tY[0], 'x', ms=6, label="Traj start")
+    # plot reference trajectory with consistent colors
+    ax1.plot(np.array(results["A"]["traj_x"], dtype=float),
+             np.array(results["A"]["traj_y"], dtype=float),
+             '-', lw=2.0, label=results["A"]["label"], color=colors["A"])
+    ax1.plot(np.array(results["B"]["traj_x"], dtype=float),
+             np.array(results["B"]["traj_y"], dtype=float),
+             '-', lw=2.0, label=results["B"]["label"], color=colors["B"])
+    ax1.plot(np.array(results["C"]["traj_x"], dtype=float),
+             np.array(results["C"]["traj_y"], dtype=float),
+             '-', lw=2.0, label=results["C"]["label"], color=colors["C"])
+    ax1.plot(np.array(results["D"]["traj_x"], dtype=float),
+             np.array(results["D"]["traj_y"], dtype=float),
+             '-', lw=2.0, label=results["D"]["label"], color=colors["D"])
 
     ax1.set_title("Path Tracking (XY)")
     ax1.set_xlabel("x")
@@ -1285,52 +1342,60 @@ def main():
 
     # 2) Tracking error
     ax2 = fig.add_subplot(gs[0, 1])
-    ax2.plot(T, track_err, lw=1.5)
+    ax2.plot(T, results["A"]["track_err"], lw=1.5, label=results["A"]["label"], color=colors["A"])
+    ax2.plot(T, results["B"]["track_err"], lw=1.5, label=results["B"]["label"], color=colors["B"])
+    ax2.plot(T, results["C"]["track_err"], lw=1.5, label=results["C"]["label"], color=colors["C"])
+    ax2.plot(T, results["D"]["track_err"], lw=1.5, label=results["D"]["label"], color=colors["D"])
     ax2.set_title("Tracking Error ‖x - x_ref‖")
-    ax2.set_xlabel("time [s]")
-    ax2.set_ylabel("error")
-    ax2.grid(True, ls=":")
+    ax2.set_xlabel("time [s]"); ax2.set_ylabel("error")
+    ax2.grid(True, ls=":"); ax2.legend()
 
     # 3) Cost-to-go
     ax3 = fig.add_subplot(gs[0, 2])
-    ax3.plot(T, J_to_go, lw=1.5)
+    ax3.plot(T, results["A"]["J_to_go"], lw=1.5, label=results["A"]["label"], color=colors["A"])
+    ax3.plot(T, results["B"]["J_to_go"], lw=1.5, label=results["B"]["label"], color=colors["B"])
+    ax3.plot(T, results["C"]["J_to_go"], lw=1.5, label=results["C"]["label"], color=colors["C"])
+    ax3.plot(T, results["D"]["J_to_go"], lw=1.5, label=results["D"]["label"], color=colors["D"])
     ax3.set_title("Cost-to-Go")
-    ax3.set_xlabel("time [s]")
-    ax3.set_ylabel("J_to_go")
-    ax3.grid(True, ls=":")
+    ax3.set_xlabel("time [s]"); ax3.set_ylabel("J_to_go")
+    ax3.grid(True, ls=":"); ax3.legend()
 
     # 4) Estimation RMSE
     ax4 = fig.add_subplot(gs[1, 0])
-    ax4.plot(T, rmse, lw=1.5)
+    ax4.plot(T, results["A"]["rmse"], lw=1.5, label=results["A"]["label"], color=colors["A"])
+    ax4.plot(T, results["B"]["rmse"], lw=1.5, label=results["B"]["label"], color=colors["B"])
+    ax4.plot(T, results["C"]["rmse"], lw=1.5, label=results["C"]["label"], color=colors["C"])
+    ax4.plot(T, results["D"]["rmse"], lw=1.5, label=results["D"]["label"], color=colors["D"])
     ax4.set_title("Estimation RMSE ‖x - x̂‖")
-    ax4.set_xlabel("time [s]")
-    ax4.set_ylabel("RMSE")
-    ax4.grid(True, ls=":")
+    ax4.set_xlabel("time [s]"); ax4.set_ylabel("RMSE")
+    ax4.grid(True, ls=":"); ax4.legend()
 
     # 5) Estimator variance / covariance trace
     ax5 = fig.add_subplot(gs[1, 1])
-    ax5.plot(T, var, lw=1.5)
+    ax5.plot(T, results["A"]["var"], lw=1.5, label=results["A"]["label"], color=colors["A"])
+    ax5.plot(T, results["B"]["var"], lw=1.5, label=results["B"]["label"], color=colors["B"])
+    ax5.plot(T, results["C"]["var"], lw=1.5, label=results["C"]["label"], color=colors["C"])
+    ax5.plot(T, results["D"]["var"], lw=1.5, label=results["D"]["label"], color=colors["D"])
     ax5.set_title("Estimator Variance (trace)")
-    ax5.set_xlabel("time [s]")
-    ax5.set_ylabel("trace(P)")
-    ax5.grid(True, ls=":")
+    ax5.set_xlabel("time [s]"); ax5.set_ylabel("trace(P)")
+    ax5.grid(True, ls=":"); ax5.legend()
 
     # 6) Control effort
     ax6 = fig.add_subplot(gs[1, 2])
-    ax6.plot(T, control_effort, lw=1.5)
+    ax6.plot(T, results["A"]["u_norm"], lw=1.5, label=results["A"]["label"], color=colors["A"])
+    ax6.plot(T, results["B"]["u_norm"], lw=1.5, label=results["B"]["label"], color=colors["B"])
+    ax6.plot(T, results["C"]["u_norm"], lw=1.5, label=results["C"]["label"], color=colors["C"])
+    ax6.plot(T, results["D"]["u_norm"], lw=1.5, label=results["D"]["label"], color=colors["D"])
     ax6.set_title("Control Effort ‖u‖")
-    ax6.set_xlabel("time [s]")
-    ax6.set_ylabel("‖u‖")
-    ax6.grid(True, ls=":")
+    ax6.set_xlabel("time [s]"); ax6.set_ylabel("‖u‖")
+    ax6.grid(True, ls=":"); ax6.legend()
 
-    fig.suptitle(f"LQG Path Tracking — {path_type}  (filter={lqg.filter_type}, lqr={lqg.lqr_type})", y=0.98)
-
-    fig_path = os.path.join(perf_dir, f"tracking_{path_type}_{stamp}.png")
+    fig.suptitle(f"LQG Path Tracking — {path_type}  (A: QKF+Aug-LQR, B: QKF+Aug-iLQR, C: EKF+Orig-LQR, D: UKF+Orig-LQR)", y=0.98)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    fig_path = os.path.join(perf_dir, f"tracking_{path_type}_all_controllers_{stamp}.png")
     fig.savefig(fig_path, dpi=150)
     # plt.show()
-
-    print(f"\nSaved results to:\n  - plot: {fig_path}\n  - pickle: {pkl_path}")
 
 if __name__ == "__main__":
     main()
