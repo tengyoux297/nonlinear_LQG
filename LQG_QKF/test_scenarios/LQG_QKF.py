@@ -19,33 +19,38 @@ os.makedirs(pkl_dir, exist_ok=True)
 
 # Path tracking related functions
 def generate_reference_path(path_type: Literal['figure8', 'circle', 'straight', 'sine_wave', 'racetrack'] = 'figure8', 
-                            num_points: int = 1000, dt: float = 0.1, scale: float = 10.0):
+                            anchor_points: int = 100, dt: float = 0.1, scale: float = 10.0, 
+                            path_length: float = 100.0):
     """
-    Generate reference paths for tracking.
+    Generate reference paths for tracking with constant path length.
     
     Args:
         path_type: Type of path ('figure8', 'circle', 'straight', 'sine_wave', 'racetrack')
-        num_points: Number of points in the path
+        anchor_points: Number of anchor points on the path (controls resolution)
         dt: Time step
         scale: Scaling factor for path size
+        path_length: Total length of the path in time units (constant for all anchor point counts)
     
     Returns:
         path: Dictionary containing x, y, vx, vy, ax, ay reference trajectories
     """
-    t = np.linspace(0, num_points * dt, num_points)
+    # Calculate time array based on constant path length
+    t = np.linspace(0, path_length, anchor_points)
     
     if path_type == 'figure8':
-        # Figure-8 path starting at origin
-        x_ref = scale * np.sin(t * 0.5)
-        y_ref = scale * np.sin(t) * 0.5
+        # Figure-8 path starting at origin - constant frequency regardless of anchor points
+        # Use fixed frequency to maintain constant path length
+        freq = 2 * np.pi / path_length  # One complete figure-8 per path_length
+        x_ref = scale * np.sin(freq * t)
+        y_ref = scale * np.sin(2 * freq * t) * 0.5
         # Shift to start at origin
         x_ref = x_ref - x_ref[0]
         y_ref = y_ref - y_ref[0]
         
     elif path_type == 'circle':
-        # Very slow circular path starting at origin
-        radius = scale * 0.5  # smaller radius
-        omega = 0.05  # much slower angular velocity
+        # Circular path starting at origin - constant angular velocity
+        radius = scale * 0.5
+        omega = 2 * np.pi / path_length  # One complete circle per path_length
         x_ref = radius * np.cos(omega * t + np.pi)  # Start at (radius, 0) = origin offset
         y_ref = radius * np.sin(omega * t + np.pi)
         # Shift to start at origin
@@ -53,23 +58,24 @@ def generate_reference_path(path_type: Literal['figure8', 'circle', 'straight', 
         y_ref = y_ref - y_ref[0]
         
     elif path_type == 'straight':
-        # Straight line path starting at origin
-        x_ref = scale * t / num_points
+        # Straight line path starting at origin - constant velocity
+        velocity = scale / path_length  # Constant velocity to reach scale distance in path_length time
+        x_ref = velocity * t
         y_ref = np.zeros_like(t)
         # Already starts at origin
         
     elif path_type == 'sine_wave':
-        # Sinusoidal path starting at origin
-        x_ref = scale * t / num_points
-        y_ref = scale * 0.3 * np.sin(2 * np.pi * t / (num_points * dt * 0.2))
+        # Sinusoidal path starting at origin - constant frequency
+        freq = 2 * np.pi / path_length  # One complete cycle per path_length
+        x_ref = scale * t / path_length  # Linear progression
+        y_ref = scale * 0.3 * np.sin(freq * t)
         # Shift to start at origin
         x_ref = x_ref - x_ref[0]
         y_ref = y_ref - y_ref[0]
         
     elif path_type == 'racetrack':
-        # Racetrack-like path (rounded rectangle)
-        period = num_points * dt
-        t_norm = (t % period) / period  # normalize to [0, 1]
+        # Racetrack-like path (rounded rectangle) - constant period
+        t_norm = (t % path_length) / path_length  # normalize to [0, 1]
         
         x_ref = np.zeros_like(t)
         y_ref = np.zeros_like(t)
@@ -591,11 +597,10 @@ class LQG_PathTracking:
         
         ####################################################
         x_actual = self.F.get_x()  # shape (n, 1), current state vector
-        x = x_actual - goal_state # shape (n, 1)
-        z = np.vstack((x, Vec(x @ x.T))) # shape (n+n^2, 1)
-        
         x_estimated = self.x_hat
         x_tilde = x_estimated - x_actual # shape (n, 1)
+        x = x_estimated - goal_state # shape (n, 1)
+        z = np.vstack((x, Vec(x @ x.T))) # shape (n+n^2, 1)
         
         ####################################################
         
@@ -640,14 +645,8 @@ class LQG_PathTracking:
         feedback_gain = -np.linalg.solve(G, self.B.T @ P_lqr @ self.A)
         
         # Use time-varying reference for path tracking
-        if self.reference_path is not None:
-            if self.hierarchical_mode:
-                current_ref = self.get_hierarchical_reference_point()
-            else:
-                current_ref = self.get_current_reference_point()
-            u_new = feedback_gain @ (self.x_hat - current_ref)
-        else:
-            u_new = feedback_gain @ (self.x_hat - goal_state)  # control input
+        
+        u_new = feedback_gain @ (self.x_hat - goal_state)  # control input
             
         self.F.set_u(u_new)
         return
@@ -1056,11 +1055,6 @@ class LQG_PathTracking:
         self.x_goal = self._blend_goal(self.ref["k"])
         self.path_index = self.ref["k"]
 
-    
-    def get_current_reference_point(self):
-        """Return the current blended goal (lookahead-smoothed)."""
-        return self.x_goal
-
     def get_current_reference_state(self, idx=None, path=None):
         """
         Return a full state vector made from a path entry.
@@ -1204,7 +1198,7 @@ class LQG_PathTracking:
 
         return rmse_list, var_list, cost_list, cost_to_go_list, tracking_error_list, trajectory_x, trajectory_y, ref_traj_x, ref_traj_y
 
-def one_trial(H = 200, process_noise_scale=1e-3, measurement_noise_scale=1e-3, nonlinearity_scale=1e3, Q_scale=1e-2, R_scale=1e-2, rand_seed=None, trial_num=0):
+def one_trial(process_noise_scale=1e-3, measurement_noise_scale=1e-3, nonlinearity_scale=1e-2, Q_scale=1e-2, R_scale=1e-2, rand_seed=None, trial_num=0):
     # --- reproducibility ---
     if rand_seed is not None:
         np.random.seed(rand_seed)
@@ -1213,10 +1207,14 @@ def one_trial(H = 200, process_noise_scale=1e-3, measurement_noise_scale=1e-3, n
     dt = 0.1
     n1, n2, p, m = 2, 2, 3, 2     # [x,y] + [vx,vy], 3 inputs, 2 measurements
     n = n1 + n2
-    path_type = 'figure8'              # horizon = length of reference
+    path_type = 'circle'              # horizon = length of reference
     
     # --- reference path ---
-    ref = generate_reference_path(path_type=path_type, num_points=H, dt=dt, scale=10.0)
+    # Define path parameters
+    anchor_points = 50  # Number of anchor points (can be changed independently)
+    path_length = 100.0  # Constant path length in time units
+    H = anchor_points*2  # Horizon matches anchor points
+    ref = generate_reference_path(path_type=path_type, anchor_points=anchor_points, dt=dt, scale=10.0, path_length=path_length)
 
     # --- dynamics / sensor ---
     A_E, A_S, B_S, W = create_vehicle_dynamics_matrices(dt=dt, process_noise_scale=process_noise_scale)
@@ -1359,6 +1357,9 @@ def one_trial(H = 200, process_noise_scale=1e-3, measurement_noise_scale=1e-3, n
     # 1) XY path
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.plot(ref['x'], ref['y'], '--', lw=1.2, alpha=0.7, label="Reference (global)", color='gray')
+    # plot the anchor points (show every 20th point to avoid overcrowding)
+    step_size = max(1, len(ref['x']) // 20)  # Show at most 20 anchor points
+    ax1.plot(ref['x'][::step_size], ref['y'][::step_size], 'o', lw=1.2, alpha=0.7, color='gray', markersize=3)
 
     # plot reference trajectory with consistent colors and dashed lines for diverged controllers
     ax1.plot(np.array(results["A"]["traj_x"], dtype=float),
