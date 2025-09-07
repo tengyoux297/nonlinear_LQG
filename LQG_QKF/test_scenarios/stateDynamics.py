@@ -43,13 +43,13 @@ class StateDynamics(object):
     self.W = W # covariance matrix for process noise w
     self.p = p # control input size
     
-    self.A = np.zeros((n,n)) # state transition matrix
+    self.A = np.zeros((n,n))
     self.A[:n1, :n1] = A_E
     self.A[n1:, n1:] = A_S
     
     
-    self.B = np.zeros((n,p)) # control input matrix
-    self.B[n1:, :p] = B_S # shape (n2,p)  
+    self.B = np.zeros((n,p))
+    self.B[n1:, :p] = B_S
     self.t = 0 # time step
     self.trajectory = [] # trajectory of the system
     self.trajectory.append([self.x, self.u]) # append initial state and control input to trajectory
@@ -101,12 +101,6 @@ class StateDynamics(object):
     current state vector
     '''
     return self.x 
-  
-  def set_x(self, x):
-    '''
-    set state vector
-    '''
-    self.x = x
   
   def set_u(self, u):
     '''

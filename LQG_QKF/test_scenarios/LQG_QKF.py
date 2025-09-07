@@ -3,215 +3,47 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from typing import Literal
 from tqdm import tqdm
 from stateDynamics import *
+from scipy.linalg import sqrtm
 import pickle as pkl
-from typing import Literal
-import time
+
+
+# Set publication-ready plotting style
+plt.style.use('default')
+mpl.rcParams['font.family'] = 'serif'
+mpl.rcParams['font.serif'] = ['Times New Roman', 'DejaVu Serif', 'Computer Modern Roman']
+mpl.rcParams['font.size'] = 10
+mpl.rcParams['axes.titlesize'] = 12
+mpl.rcParams['axes.labelsize'] = 10
+mpl.rcParams['xtick.labelsize'] = 9
+mpl.rcParams['ytick.labelsize'] = 9
+mpl.rcParams['legend.fontsize'] = 9
+mpl.rcParams['figure.titlesize'] = 14
+mpl.rcParams['lines.linewidth'] = 2
+mpl.rcParams['axes.linewidth'] = 1.2
+mpl.rcParams['grid.linewidth'] = 0.8
+mpl.rcParams['grid.alpha'] = 0.3
+
+# Publication-ready color palette
+PUBLICATION_COLORS = {
+    'ekf': '#1f77b4',      # Blue
+    'ukf': '#2ca02c',      # Green  
+    'qkf': '#ff7f0e',      # Orange
+    'qkf_analytic': '#d62728',  # Red
+    'grid': '#e0e0e0',
+    'text': '#2f2f2f'
+}
+
 small_value = 1e-6  # Small value to prevent numerical issues
 
-perf_dir = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/test_scenarios/perf'
-os.makedirs(perf_dir, exist_ok=True)
-
-pkl_dir = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/test_scenarios/pkl/'
+pkl_dir = 'LQG_QKF/2025_summer/pkl/'
 os.makedirs(pkl_dir, exist_ok=True)
 
-# Path tracking related functions
-def generate_reference_path(path_type: Literal['figure8', 'circle', 'straight', 'sine_wave', 'racetrack'] = 'figure8', 
-                            anchor_points: int = 100, dt: float = 0.1, scale: float = 10.0, 
-                            path_length: float = 100.0):
-    """
-    Generate reference paths for tracking with constant path length.
-    
-    Args:
-        path_type: Type of path ('figure8', 'circle', 'straight', 'sine_wave', 'racetrack')
-        anchor_points: Number of anchor points on the path (controls resolution)
-        dt: Time step
-        scale: Scaling factor for path size
-        path_length: Total length of the path in time units (constant for all anchor point counts)
-    
-    Returns:
-        path: Dictionary containing x, y, vx, vy, ax, ay reference trajectories
-    """
-    # Calculate time array based on constant path length
-    t = np.linspace(0, path_length, anchor_points)
-    
-    if path_type == 'figure8':
-        # Figure-8 path starting at origin - constant frequency regardless of anchor points
-        # Use fixed frequency to maintain constant path length
-        freq = 2 * np.pi / path_length  # One complete figure-8 per path_length
-        x_ref = scale * np.sin(freq * t)
-        y_ref = scale * np.sin(2 * freq * t) * 0.5
-        # Shift to start at origin
-        x_ref = x_ref - x_ref[0]
-        y_ref = y_ref - y_ref[0]
-        
-    elif path_type == 'circle':
-        # Circular path starting at origin - constant angular velocity
-        radius = scale * 0.5
-        omega = 2 * np.pi / path_length  # One complete circle per path_length
-        x_ref = radius * np.cos(omega * t + np.pi)  # Start at (radius, 0) = origin offset
-        y_ref = radius * np.sin(omega * t + np.pi)
-        # Shift to start at origin
-        x_ref = x_ref - x_ref[0]
-        y_ref = y_ref - y_ref[0]
-        
-    elif path_type == 'straight':
-        # Straight line path starting at origin - constant velocity
-        velocity = scale / path_length  # Constant velocity to reach scale distance in path_length time
-        x_ref = velocity * t
-        y_ref = np.zeros_like(t)
-        # Already starts at origin
-        
-    elif path_type == 'sine_wave':
-        # Sinusoidal path starting at origin - constant frequency
-        freq = 2 * np.pi / path_length  # One complete cycle per path_length
-        x_ref = scale * t / path_length  # Linear progression
-        y_ref = scale * 0.3 * np.sin(freq * t)
-        # Shift to start at origin
-        x_ref = x_ref - x_ref[0]
-        y_ref = y_ref - y_ref[0]
-        
-    elif path_type == 'racetrack':
-        # Racetrack-like path (rounded rectangle) - constant period
-        t_norm = (t % path_length) / path_length  # normalize to [0, 1]
-        
-        x_ref = np.zeros_like(t)
-        y_ref = np.zeros_like(t)
-        
-        for i, tn in enumerate(t_norm):
-            if tn < 0.25:  # Bottom straight
-                x_ref[i] = scale * (4 * tn)
-                y_ref[i] = 0
-            elif tn < 0.5:  # Right curve
-                angle = np.pi * (tn - 0.25) / 0.25
-                x_ref[i] = scale
-                y_ref[i] = scale * 0.5 * (1 - np.cos(angle))
-            elif tn < 0.75:  # Top straight
-                x_ref[i] = scale * (1 - 4 * (tn - 0.5))
-                y_ref[i] = scale * 0.5
-            else:  # Left curve
-                angle = np.pi * (tn - 0.75) / 0.25
-                x_ref[i] = 0
-                y_ref[i] = scale * 0.5 * (1 + np.cos(angle))
-        
-        # Shift to start at origin
-        x_ref = x_ref - x_ref[0]
-        y_ref = y_ref - y_ref[0]
-    else:
-        raise ValueError(f"Unknown path type: {path_type}")
-    
-    # Compute velocities and accelerations using finite differences
-    vx_ref = np.gradient(x_ref, dt)
-    vy_ref = np.gradient(y_ref, dt)
-    ax_ref = np.gradient(vx_ref, dt)
-    ay_ref = np.gradient(vy_ref, dt)
-    
-    path = {
-        't': t,
-        'x': x_ref,
-        'y': y_ref,
-        'vx': vx_ref,
-        'vy': vy_ref,
-        'ax': ax_ref,
-        'ay': ay_ref
-    }
-    
-    return path
-
-def create_vehicle_dynamics_matrices(dt=0.1, process_noise_scale=0.01):
-    """
-    Create vehicle dynamics matrices for path tracking.
-    State: [x, y, vx, vy] - position and velocity in 2D
-    Control: [ax, ay, steering_angle] - acceleration inputs and steering
-    
-    Args:
-        dt: Time step
-        process_noise_scale: Scale of process noise
-    
-    Returns:
-        A_E, A_S, B_S, W: System matrices
-    """
-    # Earth state: [x, y] - position
-    # Sensor state: [vx, vy] - velocity  
-    n1, n2 = 2, 2  # earth_size, sensor_size
-    p = 3  # control inputs: [ax, ay, steering_angle]
-    
-    # State transition matrices - very stable
-    A_E = np.eye(2) * 0.99  # Position with slight damping
-    A_S = np.eye(2) * 0.98  # Velocity with strong damping for stability
-    
-    # Control input matrix (only affects sensor/velocity states) - reasonable gains
-    B_S = np.array([
-        [dt * 0.5, 0, 0],      # vx affected by ax (reasonable gain)
-        [0, dt * 0.5, 0.1*dt]  # vy affected by ay and steering (reasonable gains)
-    ])
-    
-    # Process noise covariance
-    W = generate_random_symmetric_matrix(n1+n2, scale=process_noise_scale)
-    # W[:2, :2] *= 0.001  # Extremely low noise for position
-    # W[2:, 2:] *= 0.01   # Very low noise for velocity
-    
-    return A_E, A_S, B_S, W
-
-def create_sensor_matrices_for_tracking(n=4, m=2, measurement_noise_scale=0.1, nonlinearity_scale=1.0):
-    """
-    Create sensor matrices for vehicle tracking.
-    Measurements: [range, bearing] or [x_gps, y_gps]
-    
-    Args:
-        n: State size
-        m: Measurement size  
-        measurement_noise_scale: Scale of measurement noise
-        nonlinearity_scale: Scale of nonlinear measurement terms
-        
-    Returns:
-        C, M, V: Measurement matrices
-    """
-    # Linear measurement matrix (GPS-like measurements of position)
-    C = np.random.randn(m, n)
-    
-    # Quadratic measurement matrices
-    M = np.zeros((m, n, n))
-    for i in range(m):
-        M[i] = generate_random_symmetric_matrix(n, scale=nonlinearity_scale)
-    
-    # Measurement noise covariance
-    V = generate_random_symmetric_matrix(m, scale=measurement_noise_scale)
-    
-    return C, M, V
-
-class PathTrackingDynamics(StateDynamics):
-    """
-    Extended state dynamics for path tracking with proper position-velocity coupling.
-    State: [x, y, vx, vy] where position is integrated from velocity.
-    """
-    def __init__(self, n1, n2, p, W, A_E, A_S, B_S, dt=0.1):
-        super().__init__(n1, n2, p, W, A_E, A_S, B_S)
-        self.dt = dt
-        
-        # Proper vehicle dynamics: position integrated from velocity
-        # State: [x, y, vx, vy] - double integrator model
-        self.A = np.array([
-            [1, 0, self.dt, 0],        # x = x + dt*vx (proper integration)
-            [0, 1, 0, self.dt],        # y = y + dt*vy (proper integration)
-            [0, 0, 0.95, 0],           # vx with moderate damping 
-            [0, 0, 0, 0.95]            # vy with moderate damping
-        ])
-        
-    def get_current_reference_state(self, path_index, reference_path):
-        """Get the reference state at the current time step."""
-        if reference_path is None or path_index >= len(reference_path['x']):
-            return np.zeros((4, 1))
-        
-        ref_state = np.array([
-            [reference_path['x'][path_index]], 
-            [reference_path['y'][path_index]],
-            [reference_path['vx'][path_index]],
-            [reference_path['vy'][path_index]]
-        ])
-        return ref_state
+perf_dir = 'LQG_QKF/2025_summer/perf/'
+os.makedirs(perf_dir, exist_ok=True)
 
 def generate_random_symmetric_matrix(size, scale=1.0):
     """"Generate a random symmetric positive definite matrix."""
@@ -288,7 +120,7 @@ def finite_horizon_lqr(A, B, Q, R, N=100, Qf=None):
     return P
 
 def update_lqr_one_step(A, B, Q, R, P):
-    # Compute the LQR gain
+    # Compute the LQG gain
     K = -np.linalg.pinv(R + B.T @ P @ B) @ B.T @ P @ A
     P_new = A.T @ P @ A - A.T @ P @ B @ K + Q + K.T @ R @ K  # update the cost-to-go matrix
     
@@ -361,102 +193,67 @@ def validate_stable_parameters(A_E, A_S):
     
     return is_stable
 
-class LQG_PathTracking:
-    def __init__(self, n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, goal_state, H=50, 
-             filter_type: Literal['qkf', 'ekf', 'kf', 'ukf'] = 'qkf',
-             lqr_type: Literal['orig', 'aug_analytic', 'aug_numeric', 'None'] = 'orig',
-             reference_path=None, dt=0.1):
-
+class LQG:
+    def __init__(self, n1, n2, p, W, A, B, C, M, V, Q, R, goal_state, H = 50, 
+                 filter_type: Literal['qkf', 'ekf', 'kf', 'ukf'] = 'qkf',
+                 lqr_type: Literal['orig', 'aug_analytic', 'aug_numeric', 'None'] = 'orig'):
+        
         self.filter_type = filter_type
         self.lqr_type = lqr_type
-        self.dt = dt
-
-        # --- dynamics / plant ---
-        self.F = PathTrackingDynamics(n1, n2, p, W, A_E, A_S, B_S, dt=self.dt)
-        n = n1 + n2
-
-        # --- sensor ---
+        # dynamics setting
+        self.F = StateDynamics(n1, n2, p , W, A, B)
+        n = n1 + n2 # state size
+        
+        # sensor settings
         self.sensor = sensor(C, M, V)
         self.V = self.sensor.get_V()
-
-        # --- state sizes / matrices ---
+        
+        # state settings
         self.A = self.F.get_A()
         self.B = self.F.get_B()
-        self.n1 = n1
+        self.n1 = n1 
         self.n2 = n2
-        self.n  = n
-        self.p  = self.F.get_input_size()
-        self.W  = self.F.get_W()
-
-        # --- augmented state initialisation (QKF) ---
-        mu_tilde_u   = (np.eye(n + n**2) - self.F.get_A_tilde()).T @ self.F.get_mu_tilde()
-        self.Z_est   = mu_tilde_u
-        I_big        = np.eye(n**2 * (n+1)**2)
-        Phi_tilde    = self.F.get_A_tilde()
-        Sigma_tilde  = self.F.get_Sigma_tilde()
-        vec_sigma    = (I_big - np.kron(Phi_tilde, Phi_tilde)) @ Vec(Sigma_tilde)
-        self.Pz_est  = invVec(vec_sigma)
-
-        # --- horizon ---
+        self.n = n
+        self.p = self.F.get_input_size() # control input size
+        self.W = self.F.get_W()
+        
+        # augmented state settings
+        mu_tilde_u = (np.eye(n+n**2) - self.F.get_A_tilde()).T @ self.F.get_mu_tilde() # shape (n+n^2, 1)
+        self.Z_est = mu_tilde_u # initialize estimated augmented state vector
+        I = np.eye(n**2 * (n+1)**2) # shape (n^2(n+1)^2, n^2(n+1)^2)
+        Phi_tilde = self.F.get_A_tilde() # shape (n+n^2, n+n^2)
+        Sigma_tilde = self.F.get_Sigma_tilde() # shape (n+n^2, n+n^2)
+        vec_sigma_tilde_u = (I - np.kron(Phi_tilde, Phi_tilde)) @ Vec(Sigma_tilde) # shape (n^2(n+1)^2, 1)
+        self.Pz_est = invVec(vec_sigma_tilde_u) # estimation error covariance matrix
+        
+        # horizon
         self.H = H
-
-        # --- tracking flags / path ---
-        self.hierarchical_mode = False
-        self.reference_path   = reference_path
-        self.path_index       = 0  # kept for your helper methods that use index
-
-        # --- state estimates / goal ---
-        if self.reference_path is not None:
-            # initial estimate seeded from the first reference (assumes [x,y,vx,vy] leading states)
-            self.x_hat = np.zeros((self.n, 1))
-            for i, key in enumerate(['x','y','vx','vy']):
-                if key in reference_path and i < self.n:
-                    self.x_hat[i,0] = float(reference_path[key][0])
-        else:
-            self.x_hat = np.zeros((self.n, 1))
-
-        self.z_hat  = np.zeros((self.n + self.n**2, 1))
-        self.x_goal = np.zeros((self.n, 1))  # will be set below
-
-        # --- LQR cost / Riccati seed ---
-        self.Q      = Q.astype(np.float64) 
-        self.R      = R.astype(np.float64)
-        self.P_lqr  = Q.copy()[:self.n, :self.n]
-
-        # --- LQE covariance init ---
-        if self.reference_path is not None:
-            # reasonable uncertainties for [x,y,vx,vy], rest small
-            self.P_est = np.eye(self.n) * 1e-3
-            base = [1.0, 1.0, 0.5, 0.5]
-            for i, v in enumerate(base[:self.n]):
-                self.P_est[i,i] = v
-        else:
-            self.P_est = np.eye(self.n) * small_value
-
-        # --- convergence / divergence bookkeeping ---
+        
+        # states
+        self.x_hat = np.zeros((self.n, 1)) # estimated state vector
+        self.z_hat = np.zeros((self.n + self.n**2, 1)) # estimated augmented state vector
+        self.x_goal = np.zeros((self.n, 1)) # goal state vector
+        
+        # lqr
+        self.x_goal = goal_state
+        self.Q = Q.astype(np.float64)
+        self.R = R.astype(np.float64)
+        self.P_lqr = Q.copy()[:self.n, :self.n] # cost-to-go matrix for LQG
+        
+        # lqe
+        self.P_est = np.eye(self.n) * small_value  # estimation error covariance matrix 
+        
+        # convergence tracking
         self.convergence_history = {
             'cost': [],
             'estimation_error': [],
             'control_effort': [],
-            'tracking_error': [],
             'is_converged': False,
             'convergence_step': None,
             'convergence_metrics': {}
-        }
-        self.divergence_threshold = 200
-        self.is_diverged = False
-        self.divergence_step = None
-
-        # --- set initial goal ---
-        if self.reference_path is not None:
-            # Use your built-in path helpers to manage the moving goal (lookahead blend)
-            # Reduced advance_thresh and lookahead for better progress tracking
-            self.attach_path(self.reference_path, lookahead=5, advance_thresh=0.1)
-            # attach_path sets self.x_goal via _blend_goal(...)
-        else:
-            self.x_goal = goal_state
+        } 
     
-    # iLQR related
+    # iLQG related
     def get_A_hat(self, x, u):
         '''A_hat = d Z(t+1) / d x(t)'''
         I_n = np.eye(self.n) # shape (n, n)
@@ -498,20 +295,20 @@ class LQG_PathTracking:
             alpha *= 0.5                       # shrink step
         return u_nom, x_nom, 0.0               # no progress
     
-    def update_aug_ilqr(self, goal_state, alpha = 1, verbose=False):
+    def update_ilqr(self, goal_state, alpha = 1, verbose=False):
         x_nominal = self.x_hat
         u_nominal = np.zeros((self.p, 1)) # nominal control input vector
          
         max_iter = 1000
-        iteration = 0
-        diff_u = float('inf') 
-        diff_cost = float('inf')
+        iter = 0
+        diff_u = 1e10  
+        diff_cost = 1e10
         epsilon_u = 1e-6  # convergence threshold for control input change
         epsilon_cost = 1e-8  # convergence threshold for cost change
-        prev_cost = float('inf')
+        prev_cost = 1e10
         
-        while iteration < max_iter:
-            iteration += 1
+        while iter < max_iter:
+            iter += 1
             # F: first-order derivative of f   
             #   f(x, u) = A_tilde z + B_tilde u + noise = ...
             z_curr, A_hat, B_hat = self.linearise(x_nominal, u_nominal) # shape (n+n^2, 1), (n+n^2, n), (n+n^2, p)
@@ -567,7 +364,7 @@ class LQG_PathTracking:
             diff_cost = abs(current_cost - prev_cost) / (abs(prev_cost) + 1e-10)  # relative cost change
             
             if verbose:
-                print(f"iter {iteration:3d} | step α={alpha:.3f} | Δu={diff_u:.2e} | Δcost={diff_cost:.2e}")
+                print(f"iter {iter:3d} | step α={alpha:.3f} | Δu={diff_u:.2e} | Δcost={diff_cost:.2e}")
             
             # Check multiple convergence criteria
             if diff_u < epsilon_u and diff_cost < epsilon_cost:
@@ -586,7 +383,7 @@ class LQG_PathTracking:
         self.F.set_u(u_new)
         return
     
-    def update_aug_lqr_analytic(self, goal_state):
+    def update_lqr_analytic(self, goal_state, infinite_horizon=False):
         # LQG update only with augmented state
         I_p = np.eye(self.p)  # shape (p, p)
         I_p2 = np.eye(self.p ** 2)  # shape (p^2, p^2)
@@ -595,13 +392,13 @@ class LQG_PathTracking:
         A = self.F.get_A()  # shape (n, n)
         
         
+        # to be checked
         ####################################################
         x_actual = self.F.get_x()  # shape (n, 1), current state vector
+        x = x_actual - goal_state # shape (n, 1)
+        
         x_estimated = self.x_hat
         x_tilde = x_estimated - x_actual # shape (n, 1)
-        x = x_estimated - goal_state # shape (n, 1)
-        z = np.vstack((x, Vec(x @ x.T))) # shape (n+n^2, 1)
-        
         ####################################################
         
         # commutation matrix for I_p kron u
@@ -614,48 +411,36 @@ class LQG_PathTracking:
                 T[:, i * self.p + j] = vec_e_ij
 
         M = np.kron(B, B) @ (I_p2 + T) # shape (n^2, p^2)
-        q = Vec(self.Q[:self.n, :self.n]) # shape (n^2, 1)
-        # print(f'q: {q.shape}')
-        # print(f'Q: {self.Q.shape}')
+        q = Vec(self.Q) # shape (n^2, 1)
         
         S = np.zeros((self.p, self.p))  # shape (p, p)
         for i in range(self.p):
             e_i = np.zeros((self.p, 1)) # shape (p, 1)
             e_i[i] = 1
             term1 = (M @ np.kron(e_i, I_p)) # shape (n^2, p)
-            # print(f'term1: {term1.shape}')
-            # print(f'q: {q.shape}')
-            # print(f'e_i: {e_i.shape}')
-            term2 = term1.T @ q @ e_i.T  # shape (p, p)
+            term2 = term1 @ q @ e_i.T  # shape (p, p)
             S += term2  # accumulate over p columns
-        
+
         # Z = np.kron(A, B) @ np.kron(x, I_p)   + np.kron(B, A) @ np.kron(I_p, x) # shape (n^2, p)
         Z = np.kron(B, A @ x) + np.kron(A @ x, B) + np.kron(B, A @ x_tilde) + np.kron(A @ x_tilde, B)
         u_new = -np.linalg.inv(S + 2 * self.R) @ Z.T @ q # shape (p, 1)
         self.F.set_u(u_new)
 
-
-    def update_lqr_orig(self, goal_state):
-        # LQR update only with original state, no augmented state
+    def update_lqr_orig(self, goal_state, ):
+        # LQG update only with original state, no augmented state
         # P_lqr = scipy.linalg.solve_discrete_are(self.A, self.B, self.Q[:self.n, :self.n], self.R)  # P is the fixed-point
         P_lqr = finite_horizon_lqr(self.A, self.B, self.Q[:self.n, :self.n], self.R, N=1, Qf=self.P_lqr)
         self.P_lqr = P_lqr.copy() # update cost-to-go matrix
-        # feedback_gain = -np.linalg.pinv(self.R + self.B.T @ P_lqr @ self.B) @ self.B.T @ P_lqr @ self.A
-        G = self.R + self.B.T @ P_lqr @ self.B
-        feedback_gain = -np.linalg.solve(G, self.B.T @ P_lqr @ self.A)
-        
-        # Use time-varying reference for path tracking
-        
-        u_new = feedback_gain @ (self.x_hat - goal_state)  # control input
-            
+        feedback_gain = -np.linalg.pinv(self.R + self.B.T @ P_lqr @ self.B) @ self.B.T @ P_lqr @ self.A
+        u_new = feedback_gain @ (goal_state - self.x_hat)  # control input
         self.F.set_u(u_new)
         return
         
     def update_lqr(self):
         if self.lqr_type == 'None':
-            # No LQR update, no control input
+            # No LQG update, no control input
             # self.F.set_u(np.ones((self.p, 1)))
-            self.F.set_u(np.random.randn(self.p, 1))  # small random noise
+            self.F.set_u(np.random.randn(self.p, 0))  # small random noise
             return 
         else:
             goal_state = self.x_goal
@@ -663,21 +448,18 @@ class LQG_PathTracking:
                 self.update_lqr_orig(goal_state)
             elif self.filter_type == 'qkf':
                 if self.lqr_type == 'aug_numeric':
-                    self.update_aug_ilqr(goal_state, alpha=1)
-                elif self.lqr_type == 'aug_analytic':
-                    try:
-                        self.update_aug_lqr_analytic(goal_state)
-                    except Exception as e:
-                        raise ValueError(f"Analytic LQR failed with error: {e}")
+                    # self.update_lqr_newton(goal_state, infinite_horizon=False)
+                    self.update_ilqr(goal_state, alpha=1)
+                if self.lqr_type == 'aug_analytic':
+                    # self.update_lqr_analytic(goal_state, infinite_horizon=False)
+                    self.update_ilqr(goal_state, alpha=1)
                 elif self.lqr_type == 'orig':
                     self.update_lqr_orig(goal_state)
             else:
                 raise ValueError("Invalid filter type. Choose 'qkf', 'ekf', 'kf', or 'ukf'.")
         return
         
-    ######################################
-    # LQE related
-    ######################################
+    
     def update_lqe_qkf(self):
         Phi_tilde  = self.F.get_A_tilde()
         Sigma_tilde = self.F.get_Sigma_tilde()
@@ -773,12 +555,11 @@ class LQG_PathTracking:
         
         # Cholesky decomposition for numerical stability
         try:
-            P_reg = self.P_est + np.eye(n) * 1e-8  # Add regularization
-            sqrt_P = np.linalg.cholesky((n + lambda_) * P_reg)
+            sqrt_P = np.linalg.cholesky((n + lambda_) * self.P_est)
         except np.linalg.LinAlgError:
             # If not positive definite, use eigendecomposition
             eigenvals, eigenvecs = np.linalg.eigh(self.P_est)
-            eigenvals = np.maximum(eigenvals, 1e-6)  # Ensure positive
+            eigenvals = np.maximum(eigenvals, 1e-8)  # Ensure positive
             sqrt_P = eigenvecs @ np.diag(np.sqrt(eigenvals))
             sqrt_P = np.sqrt(n + lambda_) * sqrt_P
         
@@ -828,15 +609,8 @@ class LQG_PathTracking:
             diff_meas = sigma_points_meas[i] - y_predicted.flatten()
             C_tilde += weights_cov[i] * np.outer(diff_state, diff_meas)
         
-        # Kalman gain with numerical stability
-        try:
-            # Add stronger regularization for numerical stability
-            S_reg = S + np.eye(S.shape[0]) * 1e-3
-            # Use lstsq for more robust computation
-            K = np.linalg.lstsq(S_reg.T, C_tilde.T, rcond=1e-6)[0].T
-        except np.linalg.LinAlgError:
-            # Ultimate fallback: use identity gain (no correction)
-            raise ValueError("UKF Kalman gain computation failed")
+        # Kalman gain
+        K = C_tilde @ np.linalg.pinv(S)
         
         # Measurement residual (consistent with EKF)
         y = self.sensor.measure(self.F.get_x())
@@ -864,64 +638,10 @@ class LQG_PathTracking:
         # print(f'  t={t:4d}', f'‖K_{self.filter_type}‖₂=', np.linalg.norm(K),) if t % 100 == 0 else None
         return
 
-
-    ######################################
-    # helper functions
-    ######################################
+    
     def forward_state(self):
         self.F.forward()
     
-    def check_divergence(self):
-        """
-        Check if the system has diverged based on state estimates, control inputs, or covariance.
-        
-        Returns:
-            bool: True if diverged
-        """
-        if self.is_diverged:
-            return True
-            
-        # Check state estimate magnitude
-        if np.any(np.abs(self.x_hat) > self.divergence_threshold):
-            self.is_diverged = True
-            self.divergence_step = self.F.t
-            print(f"  {self.filter_type}-{self.lqr_type}: DIVERGED at step {self.F.t} (large state estimate)")
-            return True
-            
-        # Check control input magnitude
-        u = self.F.get_u()
-        if np.any(np.abs(u) > self.divergence_threshold):
-            self.is_diverged = True
-            self.divergence_step = self.F.t
-            print(f"  {self.filter_type}-{self.lqr_type}: DIVERGED at step {self.F.t} (large control input)")
-            return True
-            
-        # For EKF/UKF, apply gentle control scaling to prevent getting stuck
-        if self.filter_type in ['ekf', 'ukf'] and hasattr(self, 'ref'):
-            steps_since_advance = self.F.t - self.ref.get("last_advance_step", 0)
-            if steps_since_advance > 20:  # if stuck for 20+ steps
-                # Scale up control inputs slightly to break out of local minima
-                u_scaled = u * 1.2  # 20% increase
-                self.F.u = u_scaled
-            
-        # Check covariance matrix trace (for non-QKF filters)
-        if self.filter_type in ['ekf', 'ukf', 'kf']:
-            if np.trace(self.P_est) > self.divergence_threshold:
-                self.is_diverged = True
-                self.divergence_step = self.F.t
-                print(f"  {self.filter_type}-{self.lqr_type}: DIVERGED at step {self.F.t} (large covariance)")
-                return True
-        
-        # Check for NaN or infinite values
-        if (np.any(np.isnan(self.x_hat)) or np.any(np.isinf(self.x_hat)) or
-            np.any(np.isnan(u)) or np.any(np.isinf(u))):
-            self.is_diverged = True
-            self.divergence_step = self.F.t
-            print(f"  {self.filter_type}-{self.lqr_type}: DIVERGED at step {self.F.t} (NaN/Inf values)")
-            return True
-            
-        return False
-
     def check_system_convergence(self, tolerance_factor=0.01, window_size=50):
         """
         Check if the system has converged based on recent performance history.
@@ -958,478 +678,475 @@ class LQG_PathTracking:
             return True
             
         return False
-    
-    ######################################
-    # path tracking related functions
-    ######################################
-    def attach_path(self, path, map_to_state=None, lookahead=5, advance_thresh=0.5):
-        """
-        path: dict from your generate_reference_path (contains arrays like 'x','y','vx','vy',...)
-        map_to_state: function k -> (n,1) numpy column that maps anchor k into full system state
-        lookahead: how many anchors to look ahead when picking the goal (smoothing)
-        advance_thresh: distance threshold to advance to the next anchor
-        """
-        self.ref = {
-            "path": path,
-            "N": len(path["x"]),
-            "k": 0,                        # current anchor index
-            "lookahead": lookahead,
-            "advance_thresh": advance_thresh,
-            "last_advance_step": 0,        # track when goal was last advanced
-            "stuck_threshold": 50,         # max steps before forced advancement
-        }
-        # default mapper: [x, y, vx, vy] into the first 4 states, rest zeros
-        def _default_map(k):
-            xg = np.zeros((self.n, 1))
-            vals = []
-            for key in ["x","y","vx","vy"]:
-                if key in path: vals.append(float(path[key][k]))
-            vals = np.array(vals).reshape(-1,1)
-            xg[:len(vals), :] = vals
-            return xg
-        self.ref["map"] = _default_map if map_to_state is None else map_to_state
-        # initialize goal
-        self.x_goal = self._blend_goal(self.ref["k"])
-        self.path_index = self.ref["k"]            # <-- keep path_index in sync
-
-    def _nearest_anchor(self):
-        """Find index of nearest anchor to current *estimated* position (first 2 states assumed x,y)."""
-        # if your state layout differs, change how pos is extracted
-        pos = self.x_hat[:2, :].flatten()
-        X = np.vstack([self.ref["path"]["x"], self.ref["path"]["y"]]).T
-        d2 = np.sum((X - pos[None,:])**2, axis=1)
-        return int(np.argmin(d2))
-
-    def _blend_goal(self, k0):
-        """
-        Return a smoothed goal as a convex combo of k0..k0+lookahead.
-        This keeps your *single-step* LQR happy while looking slightly ahead.
-        """
-        L = self.ref["lookahead"]
-        idxs = np.arange(k0, min(k0+L+1, self.ref["N"]))
-        # exponential weights (heavier weight for near-term anchors)
-        lamb = 0.7
-        w = np.array([lamb**i for i in range(len(idxs))], dtype=float)
-        w /= w.sum()
-        # weighted blend of anchor states
-        xg = np.zeros((self.n, 1))
-        for wi, kk in zip(w, idxs):
-            xg += wi * self.ref["map"](kk)
-        return xg
-
-    def update_goal_from_path(self):
-        if not hasattr(self, "ref"):
-            return
-        if self.ref["k"] == 0 and self.F.t == 0:
-            self.ref["k"] = self._nearest_anchor()
-
-        # distance gate
-        p  = self.ref["map"](self.ref["k"])[:2,:].ravel()
-        pn = self.ref["map"](min(self.ref["k"]+1, self.ref["N"]-1))[:2,:].ravel()
-        x  = self.x_hat[:2,:].ravel()
-        near = np.linalg.norm(x - p) < self.ref["advance_thresh"]
-
-        # progress gate
-        seg = pn - p
-        seg2 = np.dot(seg, seg) + 1e-12
-        eta = np.dot(x - p, seg) / seg2
-        passed = (eta > 1.0)
-
-        # time-based advancement (prevent getting stuck)
-        steps_since_advance = self.F.t - self.ref["last_advance_step"]
-        stuck = steps_since_advance > self.ref["stuck_threshold"]
-
-        if (near or passed or stuck) and self.ref["k"] < self.ref["N"] - 1:
-            # allow skipping multiple anchors if moving fast
-            while self.ref["k"] < self.ref["N"] - 1:
-                p  = self.ref["map"](self.ref["k"])[:2,:].ravel()
-                pn = self.ref["map"](min(self.ref["k"]+1, self.ref["N"]-1))[:2,:].ravel()
-                seg = pn - p; seg2 = np.dot(seg, seg) + 1e-12
-                eta = np.dot(x - p, seg) / seg2
-                if (np.linalg.norm(x - p) < self.ref["advance_thresh"]) or (eta > 1.0) or stuck:
-                    self.ref["k"] += 1
-                    self.ref["last_advance_step"] = self.F.t  # update advancement time
-                else:
-                    break
-
-        self.x_goal = self._blend_goal(self.ref["k"])
-        self.path_index = self.ref["k"]
-
-    def get_current_reference_state(self, idx=None, path=None):
-        """
-        Return a full state vector made from a path entry.
-        If a path is attached, prefer the blended goal.
-        """
-        if hasattr(self, "ref"):
-            # Use the blended goal for consistency with control
-            return self.x_goal
-
-        # Fallback: build from provided (idx, path) like your old code expects
-        if (idx is not None) and (path is not None):
-            k = max(0, min(idx, len(path['x']) - 1))
-            xg = np.zeros((self.n, 1))
-            vals = []
-            for key in ['x','y','vx','vy']:
-                if key in path: vals.append(float(path[key][k]))
-            if vals:
-                vals = np.array(vals).reshape(-1,1)
-                xg[:len(vals), :] = vals
-            return xg
-
-        # Last-resort: current goal
-        return self.x_goal
-
-    def get_hierarchical_reference_point(self):
-        """Stub for hierarchical mode; return current goal unless you add waypoints."""
-        return self.x_goal
-    
-    ######################################
-    # main function
-    ######################################
+        
     def run_sim(self):
-        rmse_list, var_list, cost_list = [], [], []
-        tracking_error_list, trajectory_x, trajectory_y = [], [], []
-
-        ref_traj_x, ref_traj_y = [], []
+        rmse_list = []
+        var_list = []
+        cost_list = []
         
         for step in tqdm(range(1, self.H + 1, 1)):
-            # Divergence guard
-            if self.check_divergence():
-                # For diverged controllers, fill remaining steps with NaN to indicate no valid data
-                for _ in range(step, self.H + 1):
-                    rmse_list.append(float('nan'))
-                    var_list.append(float('nan'))
-                    cost_list.append(float('nan'))
-                    tracking_error_list.append(float('nan'))
-                    trajectory_x.append(trajectory_x[-1] if trajectory_x else 0.0)
-                    trajectory_y.append(trajectory_y[-1] if trajectory_y else 0.0)
-                break
-
-            # 1) Filter update
             self.update_lqe()
-
-            # 2) Refresh moving goal BEFORE control
-            if self.reference_path is not None:
-                self.update_goal_from_path()
-                x_ref_now = self.get_current_reference_state(self.path_index, self.reference_path)
-            else:
-                x_ref_now = self.x_goal
-            
-            ref_traj_x.append(x_ref_now[0,0])
-            ref_traj_y.append(x_ref_now[1,0])
-
-            # 3) Control + plant step
             if self.lqr_type != 'None':
                 self.update_lqr()
                 self.forward_state()
-
-            # 4) Log actual trajectory
-            x_act = self.F.get_x()
-            trajectory_x.append(x_act[0].item())
-            trajectory_y.append(x_act[1].item())
             
-
-            # 5) Estimation RMSE
-            rmse_list.append(np.linalg.norm(x_act - self.x_hat).item())
-
-            # 6) Tracking error (use blended goal for consistency)
-            if self.reference_path is not None:
-                trk_err = np.linalg.norm(x_act - x_ref_now).item()
-            else:
-                trk_err = 0.0
-            tracking_error_list.append(trk_err)
-            self.convergence_history['tracking_error'].append(trk_err)
-
-            # 7) Variance
+            # record error
+            estimate_error = np.linalg.norm(self.F.get_x() - self.x_hat).item() 
+            rmse_list.append(estimate_error)
+            
+            # record variance
             if self.filter_type == 'qkf':
-                var = float(np.trace(self.Pz_est[:self.n, :self.n]))
-            elif self.filter_type in ['ekf','kf','ukf']:
-                var = float(np.trace(self.P_est))
+                var = np.trace(self.Pz_est[:self.n, :self.n])
+            elif self.filter_type == 'ekf' or self.filter_type == 'kf' or self.filter_type == 'ukf':
+                var = np.trace(self.P_est)
             else:
-                var = 0.0
+                var = 0.0  # Default case
             var_list.append(var)
-
-            # 8) Stage cost (tracking vs fixed goal)
-            u  = self.F.get_u()
-            dx = self.x_hat - x_ref_now
-            cost = float((dx.T @ self.Q[:self.n, :self.n] @ dx + u.T @ self.R @ u).item())
-            cost_list.append(cost)
-
-            # 9) Convergence bookkeeping
-            self.convergence_history['cost'].append(cost)
-            self.convergence_history['estimation_error'].append(np.linalg.norm(x_act - self.x_hat).item())
-            self.convergence_history['control_effort'].append(float(np.linalg.norm(u)))
-
+            
+            # record cost   
+            x_goal = self.x_goal
+            x_est = self.x_hat
+            u = self.F.get_u()
+            dx = x_est - x_goal
+            cost = dx.T @ self.Q[:self.n, :self.n] @ dx + u.T @ self.R @ u
+            cost_value = cost.item()
+            cost_list.append(cost_value)
+            
+            # Update convergence history
+            self.convergence_history['cost'].append(cost_value)
+            self.convergence_history['estimation_error'].append(estimate_error)
+            self.convergence_history['control_effort'].append(np.linalg.norm(u).item())
+            
+            # Check for early convergence (optional - can save computation)
             if step > 200 and self.check_system_convergence():
-                if step % 100 == 0:
+                if step % 100 == 0:  # Print occasionally
                     print(f"  {self.filter_type}-{self.lqr_type}: Converged at step {step}")
-                # keep running to fill horizon
-
-        # Cost-to-go
+                # Could break here for early stopping, but continue for full simulation
+            
         cost_to_go_list = []
+        for i in range(len(cost_list)):
+            cost_to_go = np.sum(cost_list[i:])
+            cost_to_go_list.append(cost_to_go)  
+            
+        return rmse_list, var_list, cost_to_go_list
         
-        # Check if divergence occurred
-        if self.is_diverged and self.divergence_step is not None and self.divergence_step > 0:
-            # Calculate cost-to-go for the entire horizon, but with special handling for diverged portion
             
-            # First, calculate cost-to-go normally for the entire list
-            acc = 0.0
-            temp_cost_to_go = []
-            for c in reversed(cost_list):
-                acc += c
-                temp_cost_to_go.append(acc)
-            temp_cost_to_go.reverse()
-            
-            # Now modify the diverged portion to be horizontal
-            # The cost-to-go at divergence step should remain constant afterwards
-            divergence_cost_to_go = temp_cost_to_go[self.divergence_step - 1] if self.divergence_step > 0 else temp_cost_to_go[0]
-            
-            cost_to_go_list = temp_cost_to_go.copy()
-            # Make the cost-to-go horizontal from divergence point onwards
-            for i in range(self.divergence_step, len(cost_to_go_list)):
-                cost_to_go_list[i] = divergence_cost_to_go
-        else:
-            # No divergence, calculate normally
-            acc = 0.0
-            for c in reversed(cost_list):
-                acc += c
-                cost_to_go_list.append(acc)
-            cost_to_go_list.reverse()
 
-        return rmse_list, var_list, cost_list, cost_to_go_list, tracking_error_list, trajectory_x, trajectory_y, ref_traj_x, ref_traj_y
-
-def one_trial(process_noise_scale=1e-3, measurement_noise_scale=1e-3, nonlinearity_scale=1e-2, Q_scale=1e-2, R_scale=1e-2, rand_seed=None, trial_num=0):
-    # --- reproducibility ---
+def one_trial(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, rand_seed=None):
+    n1 = 2
+    n2 = 2
+    n = n1 + n2 # state size
+    p = 3
+    m = 2
+    
     if rand_seed is not None:
         np.random.seed(rand_seed)
-
-    # --- sim / model config ---
-    dt = 0.1
-    n1, n2, p, m = 2, 2, 3, 2     # [x,y] + [vx,vy], 3 inputs, 2 measurements
-    n = n1 + n2
-    path_type = 'circle'              # horizon = length of reference
     
-    # --- reference path ---
-    # Define path parameters
-    anchor_points = 50  # Number of anchor points (can be changed independently)
-    path_length = 100.0  # Constant path length in time units
-    H = anchor_points*2  # Horizon matches anchor points
-    ref = generate_reference_path(path_type=path_type, anchor_points=anchor_points, dt=dt, scale=10.0, path_length=path_length)
-
-    # --- dynamics / sensor ---
-    A_E, A_S, B_S, W = create_vehicle_dynamics_matrices(dt=dt, process_noise_scale=process_noise_scale)
-    C, M, V = create_sensor_matrices_for_tracking(n=n, m=m, measurement_noise_scale=measurement_noise_scale, nonlinearity_scale=nonlinearity_scale)
-
-    # --- costs ---
+    # Use stable parameter generation
+    A_E, A_S, B_S, C, M, W, V = generate_stable_system_parameters(
+        n1, n2, p, m, noise_scale, m_scale
+    )
+    
+    # Validate stability
+    if not validate_stable_parameters(A_E, A_S):
+        print("Warning: Generated unstable parameters, but continuing...")
+    
+    # Q, R must be symmetric positive definite matrices
     Q = generate_random_symmetric_matrix(n+n**2, scale=Q_scale)
-    Q[:n, :n] *= 1e1   # position >> velocity
+    # Q = generate_random_symmetric_matrix(n, scale=1.0)
     R = generate_random_symmetric_matrix(p, scale=R_scale)
-
-    goal_state = np.zeros((n, 1))  # unused in tracking except as a default
-
-    # --- controller A: QKF + Aug-LQR-Analytic ---
-    lqg_A = LQG_PathTracking(
-        n1, n2, p, W, A_E, A_S, B_S,
-        C, M, V, Q, R,
-        goal_state=goal_state,
-        H=H + 1,
-        filter_type='qkf',
-        lqr_type='aug_analytic',
-        reference_path=ref,
-        dt=dt
-    )
-    start_time_A = time.time()
-    rmse_A, var_A, stage_cost_A, cost_to_go_A, err_A, x_A, y_A, rx_A, ry_A = lqg_A.run_sim()
-    end_time_A = time.time()
-    time_A = end_time_A - start_time_A
-    u_A = list(lqg_A.convergence_history["control_effort"].copy())
-
-    # --- controller B (baseline): QKF + Aug-iLQR-Numeric ---
-    lqg_B = LQG_PathTracking(
-        n1, n2, p, W, A_E, A_S, B_S,
-        C, M, V, Q, R,
-        goal_state=goal_state,
-        H=H + 1,
-        filter_type='qkf',
-        lqr_type='aug_numeric',
-        reference_path=ref,
-        dt=dt
-    )
-    start_time_B = time.time()
-    rmse_B, var_B, stage_cost_B, cost_to_go_B, err_B, x_B, y_B, rx_B, ry_B = lqg_B.run_sim()
-    end_time_B = time.time()
-    time_B = end_time_B - start_time_B
-    u_B = list(lqg_B.convergence_history["control_effort"].copy())
-
-    # --- controller C (baseline): EKF + orig LQR ---
-    lqg_C = LQG_PathTracking(
-        n1, n2, p, W, A_E, A_S, B_S,
-        C, M, V, Q, R,
-        goal_state=goal_state,
-        H=H + 1,
-        filter_type='ekf',
-        lqr_type='orig',
-        reference_path=ref,
-        dt=dt
-    )
-    start_time_C = time.time()
-    rmse_C, var_C, stage_cost_C, cost_to_go_C, err_C, x_C, y_C, rx_C, ry_C = lqg_C.run_sim()
-    end_time_C = time.time()
-    time_C = end_time_C - start_time_C
-    u_C = list(lqg_C.convergence_history["control_effort"].copy())
     
-    # --- controller D (baseline): UKF + orig LQR ---
-    lqg_D = LQG_PathTracking(
-        n1, n2, p, W, A_E, A_S, B_S,
-        C, M, V, Q, R,
-        goal_state=goal_state,
-        H=H + 1,
-        filter_type='ukf',
-        lqr_type='orig',
-        reference_path=ref,
-        dt=dt
-    )
-    start_time_D = time.time()
-    rmse_D, var_D, stage_cost_D, cost_to_go_D, err_D, x_D, y_D, rx_D, ry_D = lqg_D.run_sim()
-    end_time_D = time.time()
-    time_D = end_time_D - start_time_D
-    u_D = list(lqg_D.convergence_history["control_effort"].copy())
+    goal_state = generate_goal_state(np.zeros((n1, 1)), n2) # goal state vector
+    # lqg_kf_sys = LQG(n, p, W, A, B, C, M, V, Q, R, H=1000, filter_type='kf')
+    # err_list_kf = lqg_kf_sys.run_sim()
+    # plt.plot(err_list_kf, label=f'kf measure error')
     
+    lqe_qkf = LQG(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='None', goal_state=goal_state)
+    err_list_qkf, var_list_qkf, _ = lqe_qkf.run_sim()
     
-    # --- pad to H if any run diverged early ---
-    def pad_to_H(lst, H):
-        if len(lst) < H:
-            lst.extend([None] * (H - len(lst)))
-        return lst
+    lqg_ekf = LQG(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ekf', lqr_type='orig', goal_state=goal_state)
+    err_list_ekf, var_list_ekf, cost_list_ekf = lqg_ekf.run_sim()
+    
+    lqg_qkf_aug_num = LQG(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_numeric', goal_state=goal_state)
+    err_list_aug_num, var_list_aug_num, cost_list_aug_num = lqg_qkf_aug_num.run_sim()
+    
+    lqg_qkf_aug_analytic = LQG(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_analytic', goal_state=goal_state)
+    err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic = lqg_qkf_aug_analytic.run_sim()
+    
+    lqg_ukf = LQG(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ukf', lqr_type='orig', goal_state=goal_state)
+    err_list_ukf, var_list_ukf, cost_list_ukf = lqg_ukf.run_sim()
 
-    for series in [u_A, rmse_A, var_A, stage_cost_A, cost_to_go_A, err_A, x_A, y_A, rx_A, ry_A,
-                   u_B, rmse_B, var_B, stage_cost_B, cost_to_go_B, err_B, x_B, y_B, rx_B, ry_B,
-                   u_C, rmse_C, var_C, stage_cost_C, cost_to_go_C, err_C, x_C, y_C, rx_C, ry_C,
-                   u_D, rmse_D, var_D, stage_cost_D, cost_to_go_D, err_D, x_D, y_D, rx_D, ry_D]:
-        pad_to_H(series, H)
+    return [err_list_qkf, var_list_qkf], [err_list_ekf, var_list_ekf, cost_list_ekf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic], [err_list_ukf, var_list_ukf, cost_list_ukf]
 
-    # --- pack & save results (all four controllers) ---
-    results = {
-        "ref": ref, "dt": dt, "path_type": path_type,
-        "A": {"label": "QKF + Aug-LQR-Analytic", "rmse": rmse_A, "var": var_A, "stage_cost": stage_cost_A, "cost_to_go": cost_to_go_A,
-              "track_err": err_A, "traj_x": x_A, "traj_y": y_A, "ref_traj_x": rx_A, "ref_traj_y": ry_A, "u_norm": u_A,
-              "is_diverged": lqg_A.is_diverged, "divergence_step": lqg_A.divergence_step, "execution_time": time_A},
-        "B": {"label": "QKF + Aug-iLQR-Numeric", "rmse": rmse_B, "var": var_B, "stage_cost": stage_cost_B, "cost_to_go": cost_to_go_B,
-              "track_err": err_B, "traj_x": x_B, "traj_y": y_B, "ref_traj_x": rx_B, "ref_traj_y": ry_B, "u_norm": u_B,
-              "is_diverged": lqg_B.is_diverged, "divergence_step": lqg_B.divergence_step, "execution_time": time_B},
-        "C": {"label": "EKF + Orig-LQR", "rmse": rmse_C, "var": var_C, "stage_cost": stage_cost_C, "cost_to_go": cost_to_go_C,
-              "track_err": err_C, "traj_x": x_C, "traj_y": y_C, "ref_traj_x": rx_C, "ref_traj_y": ry_C, "u_norm": u_C,
-              "is_diverged": lqg_C.is_diverged, "divergence_step": lqg_C.divergence_step, "execution_time": time_C},
-        "D": {"label": "UKF + Orig-LQR", "rmse": rmse_D, "var": var_D, "stage_cost": stage_cost_D, "cost_to_go": cost_to_go_D,
-              "track_err": err_D, "traj_x": x_D, "traj_y": y_D, "ref_traj_x": rx_D, "ref_traj_y": ry_D, "u_norm": u_D,
-              "is_diverged": lqg_D.is_diverged, "divergence_step": lqg_D.divergence_step, "execution_time": time_D},
+def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, rand_seed=None):
+    # Check if pkl files already exist
+    ekf_file = pkl_dir + f'ekf_results-mscale={int(m_scale)}.pkl'
+    qkf_file = pkl_dir + f'qkf_results-mscale={int(m_scale)}.pkl'
+    qkf_analytic_file = pkl_dir + f'qkf_analytic_results-mscale={int(m_scale)}.pkl'
+    ukf_file = pkl_dir + f'ukf_results-mscale={int(m_scale)}.pkl'
+    
+    # Check if all required files exist
+    if (os.path.exists(ekf_file) and os.path.exists(qkf_file) and 
+        os.path.exists(qkf_analytic_file) and os.path.exists(ukf_file)):
+        print(f"Found existing pkl files for m_scale={int(m_scale)}. Skipping simulation.")
+        print(f"Loading existing results from: {ekf_file}, {qkf_file}, {qkf_analytic_file}, {ukf_file}")
+        
+        # Load existing results
+        with open(ekf_file, 'rb') as f:
+            err_list_ekf_all, var_list_ekf_all, cost_list_ekf_all = pkl.load(f)
+        with open(qkf_file, 'rb') as f:
+            err_list_qkf_num_all, var_list_qkf_num_all, cost_list_qkf_num_all = pkl.load(f)
+        with open(qkf_analytic_file, 'rb') as f:
+            err_list_qkf_analytic_all, var_list_qkf_analytic_all, cost_list_qkf_analytic_all = pkl.load(f)
+        with open(ukf_file, 'rb') as f:
+            err_list_ukf_all, var_list_ukf_all, cost_list_ukf_all = pkl.load(f)
+        
+        # Convert to numpy arrays if they aren't already
+        err_list_ekf_all = np.array(err_list_ekf_all)
+        var_list_ekf_all = np.array(var_list_ekf_all)
+        cost_list_ekf_all = np.array(cost_list_ekf_all)
+        err_list_qkf_num_all = np.array(err_list_qkf_num_all)
+        var_list_qkf_num_all = np.array(var_list_qkf_num_all)
+        cost_list_qkf_num_all = np.array(cost_list_qkf_num_all)
+        err_list_qkf_analytic_all = np.array(err_list_qkf_analytic_all)
+        var_list_qkf_analytic_all = np.array(var_list_qkf_analytic_all)
+        cost_list_qkf_analytic_all = np.array(cost_list_qkf_analytic_all)
+        err_list_ukf_all = np.array(err_list_ukf_all)
+        var_list_ukf_all = np.array(var_list_ukf_all)
+        cost_list_ukf_all = np.array(cost_list_ukf_all)
+        
+        # Skip to averaging and plotting
+        skip_simulation = True
+    else:
+        print(f"Running simulation for m_scale={int(m_scale)}...")
+        skip_simulation = False
+        
+        err_list_ekf_all = []
+        var_list_ekf_all = []
+        cost_list_ekf_all = []
+
+        err_list_qkf_num_all = []
+        var_list_qkf_num_all = []
+        cost_list_qkf_num_all = []
+
+        err_list_qkf_analytic_all = []
+        var_list_qkf_analytic_all = []
+        cost_list_qkf_analytic_all = []
+
+        err_list_ukf_all = []
+        var_list_ukf_all = []
+        cost_list_ukf_all = []
+
+        for i in tqdm(range(trials)):
+            seed_i = rand_seed + i if rand_seed is not None else None
+            lqe_qkf_results, ekf_results, qkf_num_results, qkf_analytic_results, ukf_results = one_trial(
+                H=H, noise_scale=noise_scale, m_scale=m_scale,
+                Q_scale=Q_scale, R_scale=R_scale, rand_seed=seed_i
+            )
+            
+            # lqe_qkf_results, ekf_results, qkf_results = one_trial(H=H, noise_scale=noise_scale, m_scale=m_scale, Q_scale=Q_scale, R_scale=R_scale, rand_seed=rand_seed)
+            
+            err_list_ekf_all.append(ekf_results[0])
+            var_list_ekf_all.append(ekf_results[1])
+            cost_list_ekf_all.append(ekf_results[2])
+            
+            err_list_qkf_num_all.append(qkf_num_results[0])
+            var_list_qkf_num_all.append(qkf_num_results[1])
+            cost_list_qkf_num_all.append(qkf_num_results[2])
+
+            err_list_qkf_analytic_all.append(qkf_analytic_results[0])
+            var_list_qkf_analytic_all.append(qkf_analytic_results[1])
+            cost_list_qkf_analytic_all.append(qkf_analytic_results[2])
+
+            err_list_ukf_all.append(ukf_results[0])
+            var_list_ukf_all.append(ukf_results[1])
+            cost_list_ukf_all.append(ukf_results[2])
+
+
+    # average results
+    err_list_ekf_avg = np.mean(np.array(err_list_ekf_all), axis=0)
+    var_list_ekf_avg = np.mean(np.array(var_list_ekf_all), axis=0)
+    cost_list_ekf_avg = np.mean(np.array(cost_list_ekf_all), axis=0)
+
+    err_list_qkf_num_avg = np.mean(np.array(err_list_qkf_num_all), axis=0)
+    var_list_qkf_num_avg = np.mean(np.array(var_list_qkf_num_all), axis=0)
+    cost_list_qkf_num_avg = np.mean(np.array(cost_list_qkf_num_all), axis=0)
+
+    err_list_qkf_analytic_avg = np.mean(np.array(err_list_qkf_analytic_all), axis=0)
+    var_list_qkf_analytic_avg = np.mean(np.array(var_list_qkf_analytic_all), axis=0)
+    cost_list_qkf_analytic_avg = np.mean(np.array(cost_list_qkf_analytic_all), axis=0)
+
+    err_list_ukf_avg = np.mean(np.array(err_list_ukf_all), axis=0)
+    var_list_ukf_avg = np.mean(np.array(var_list_ukf_all), axis=0)
+    cost_list_ukf_avg = np.mean(np.array(cost_list_ukf_all), axis=0)
+
+    # Only save pkl files if simulation was actually run
+    if not skip_simulation:
+        os.makedirs(pkl_dir, exist_ok=True)
+        with open(pkl_dir + f'ekf_results-mscale={int(m_scale)}.pkl', 'wb') as f:
+            pkl.dump((np.array(err_list_ekf_all), np.array(var_list_ekf_all), np.array(cost_list_ekf_all)), f)
+        with open(pkl_dir + f'qkf_results-mscale={int(m_scale)}.pkl', 'wb') as f:
+            pkl.dump((np.array(err_list_qkf_num_all), np.array(var_list_qkf_num_all), np.array(cost_list_qkf_num_all)), f)
+        with open(pkl_dir + f'qkf_analytic_results-mscale={int(m_scale)}.pkl', 'wb') as f:
+            pkl.dump((np.array(err_list_qkf_analytic_all), np.array(var_list_qkf_analytic_all), np.array(cost_list_qkf_analytic_all)), f)
+        with open(pkl_dir + f'ukf_results-mscale={int(m_scale)}.pkl', 'wb') as f:
+            pkl.dump((np.array(err_list_ukf_all), np.array(var_list_ukf_all), np.array(cost_list_ukf_all)), f)
+
+    
+    if plot:  
+        # Plot estimation performance comparison with publication-ready styling
+        fig, ax = plt.subplots(2, 1, figsize=(8, 12))
+        fig.suptitle('Estimation Performance Comparison', fontsize=14, y=0.98, fontweight='bold')
+        
+        # Error subplot
+        ax[0].set_title(f'Estimation Error, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
+        ax[0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
+        ax[0].set_ylabel('Mean Squared Error', fontsize=20, fontweight='bold')
+        ax[0].plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax[0].plot(err_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax[0].plot(err_list_qkf_num_avg, label='QKF', color=PUBLICATION_COLORS['qkf'], linewidth=2.5)
+        ax[0].legend(frameon=True, fancybox=True, shadow=True, loc='upper right')
+        ax[0].grid(True, alpha=0.3, linestyle='--')
+        ax[0].set_yscale('log')
+        
+        # Variance subplot
+        ax[1].set_title('Estimation Variance', fontsize=12, fontweight='bold', pad=15)
+        ax[1].set_xlabel('Time Step', fontsize=11, fontweight='bold')
+        ax[1].set_ylabel('Estimation Variance', fontsize=11, fontweight='bold')
+        ax[1].plot(var_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax[1].plot(var_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax[1].plot(var_list_qkf_num_avg, label='QKF', color=PUBLICATION_COLORS['qkf'], linewidth=2.5)
+        ax[1].legend(frameon=True, fancybox=True, shadow=True, loc='upper right')
+        ax[1].grid(True, alpha=0.3, linestyle='--')
+        ax[1].set_yscale('log')
+        
+        plt.tight_layout()
+        plt.savefig(perf_dir + 'estimation_performance.png', dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+
+        # Plot cost performance comparison with publication-ready styling
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.set_title(f'Cost Performance Comparison, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
+        ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
+        ax.set_ylabel('Cost-to-go (log scale)', fontsize=20, fontweight='bold')
+        
+        # Plot with enhanced styling
+        ax.plot(cost_list_ekf_avg, label='LQG+EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax.plot(cost_list_ukf_avg, label='LQG+UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax.plot(cost_list_qkf_num_avg, label='iLQG+QKF', color=PUBLICATION_COLORS['qkf'], linewidth=2.5)
+        
+        ax.legend(frameon=True, fancybox=True, shadow=True, loc='upper right', fontsize=11)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.set_yscale('log')
+        
+        # Enhance tick labels
+        ax.tick_params(axis='both', which='major', labelsize=10)
+        
+        plt.tight_layout()
+        plt.savefig(perf_dir + f'cost_perf-mscale={int(m_scale)}.png', dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        # Plot convergence comparison with publication-ready styling
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        # fig.suptitle('Convergence Analysis', fontsize=20, y=0.98, fontweight='bold')
+        
+        # Use improved convergence detection
+        convergence_ekf = []
+        convergence_qkf_num = []
+        convergence_ukf = []
+        
+        tolerance = np.mean(cost_list_ekf_avg[:100]) * 0.01  # 1% of initial cost as tolerance
+        
+        for cnt in range(trials):
+            # For each trial, detect convergence using the improved method
+            conv_ekf, _ = detect_convergence(cost_list_ekf_all[cnt], tolerance=tolerance)
+            conv_qkf_num, _ = detect_convergence(cost_list_qkf_num_all[cnt], tolerance=tolerance)
+            conv_ukf, _ = detect_convergence(cost_list_ukf_all[cnt], tolerance=tolerance)
+            
+            convergence_ekf.append(conv_ekf if conv_ekf is not None else H)
+            convergence_qkf_num.append(conv_qkf_num if conv_qkf_num is not None else H)
+            convergence_ukf.append(conv_ukf if conv_ukf is not None else H)
+        
+        # Subplot 1: Convergence times
+        ax1 = axes[0, 0]
+        ax1.set_title(f'Time to Convergence, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
+
+        # Plot convergence times with enhanced styling
+        trials_range = range(trials)
+        ax1.plot(trials_range, convergence_ekf, label='LQG+EKF', marker='o', markersize=6, alpha=0.8, 
+                color=PUBLICATION_COLORS['ekf'], linewidth=2, markeredgecolor='white', markeredgewidth=1)
+        ax1.plot(trials_range, convergence_ukf, label='LQG+UKF', marker='d', markersize=6, alpha=0.8, 
+                color=PUBLICATION_COLORS['ukf'], linewidth=2, markeredgecolor='white', markeredgewidth=1)
+        ax1.plot(trials_range, convergence_qkf_num, label='iLQG+QKF', marker='s', markersize=6, alpha=0.8, 
+                color=PUBLICATION_COLORS['qkf'], linewidth=2, markeredgecolor='white', markeredgewidth=1)
+        ax1.set_xlabel('Trial', fontsize=20, fontweight='bold')
+        ax1.set_ylabel('Convergence Time (steps)', fontsize=20, fontweight='bold')
+        ax1.legend(frameon=True, fancybox=True, shadow=True, fontsize=10)
+        ax1.grid(True, alpha=0.3, linestyle='--')
+        ax1.tick_params(axis='both', which='major', labelsize=9)
+        
+        # Subplot 2: Convergence statistics
+        ax2 = axes[0, 1]
+        ax2.set_title(f'Average Convergence Time, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
+        methods = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF']
+        avg_conv_times = [np.mean(convergence_ekf), np.mean(convergence_ukf), np.mean(convergence_qkf_num)]
+        std_conv_times = [np.std(convergence_ekf), np.std(convergence_ukf), np.std(convergence_qkf_num)]
+        
+        # Enhanced bar plot with better colors and styling
+        colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf']]
+        bars = ax2.bar(methods, avg_conv_times, yerr=std_conv_times, capsize=8, alpha=0.8, 
+                       color=colors, edgecolor='black', linewidth=1)
+        ax2.set_ylabel('Average Convergence Time (steps)', fontsize=20, fontweight='bold')
+        ax2.tick_params(axis='x', rotation=45, labelsize=10)
+        ax2.grid(True, alpha=0.3, linestyle='--', axis='y')
+        
+        # Add value labels on bars with better positioning and styling
+        for bar, avg_time, std_time in zip(bars, avg_conv_times, std_conv_times):
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + std_time + max(std_conv_times) * 0.1, 
+                    f'{avg_time:.0f}±{std_time:.0f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+        
+        ax2.tick_params(axis='both', which='major', labelsize=9)
+        
+        # Subplot 3: Convergence rate (percentage converged vs time)
+        ax3 = axes[1, 0]
+        ax3.set_title(f'Convergence Rate Over Time, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
+        time_steps = np.arange(0, H, 10)
+        
+        ekf_conv_rate = []
+        qkf_num_conv_rate = []
+        ukf_conv_rate = []
+        
+        for t in time_steps:
+            ekf_conv_rate.append(np.sum(np.array(convergence_ekf) <= t) / trials * 100)
+            qkf_num_conv_rate.append(np.sum(np.array(convergence_qkf_num) <= t) / trials * 100)
+            ukf_conv_rate.append(np.sum(np.array(convergence_ukf) <= t) / trials * 100)
+        
+        # Enhanced line plots with better styling
+        ax3.plot(time_steps, ekf_conv_rate, label='LQG+EKF', linewidth=3, color=PUBLICATION_COLORS['ekf'], marker='o', markersize=4)
+        ax3.plot(time_steps, ukf_conv_rate, label='LQG+UKF', linewidth=3, color=PUBLICATION_COLORS['ukf'], marker='s', markersize=4)
+        ax3.plot(time_steps, qkf_num_conv_rate, label='iLQG+QKF', linewidth=3, color=PUBLICATION_COLORS['qkf'], marker='^', markersize=4)
+        ax3.set_xlabel('Time Steps', fontsize=20, fontweight='bold')
+        ax3.set_ylabel('Convergence Rate (%)', fontsize=20, fontweight='bold')
+        ax3.legend(frameon=True, fancybox=True, shadow=True, fontsize=10)
+        ax3.grid(True, alpha=0.3, linestyle='--')
+        ax3.set_ylim(0, 105)
+        ax3.tick_params(axis='both', which='major', labelsize=9)
+        
+        # Subplot 4: Final convergence status
+        ax4 = axes[1, 1]
+        ax4.set_title(f'Convergence Rate, Factor m = {int(m_scale)}', pad=25, fontsize=20, fontweight='bold')
+        conv_counts = [
+            np.sum(np.array(convergence_ekf) < H),
+            np.sum(np.array(convergence_ukf) < H),
+            # np.sum(np.array(convergence_qkf_analytic) < H),
+            np.sum(np.array(convergence_qkf_num) < H),
+        ]
+        conv_percentages = [count/trials*100 for count in conv_counts]
+        
+        # Enhanced bar plot with better styling
+        colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf']]
+        bars = ax4.bar(methods, conv_percentages, alpha=0.8, color=colors, edgecolor='black', linewidth=1)
+        ax4.set_ylabel('Convergence Rate (%)', fontsize=20, fontweight='bold')
+        ax4.tick_params(axis='x', rotation=45, labelsize=10)
+        ax4.set_ylim(0, 105)
+        ax4.grid(True, alpha=0.3, linestyle='--', axis='y')
+        
+        # Add percentage labels with better positioning and styling
+        for bar, pct in zip(bars, conv_percentages):
+            ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2, 
+                    f'{pct:.1f}%', ha='center', va='bottom', fontsize=9, fontweight='bold')
+        
+        ax4.tick_params(axis='both', which='major', labelsize=9)
+        
+        # Adjust layout to prevent overlap
+        plt.subplots_adjust(top=0.92, bottom=0.12, left=0.1, right=0.95, hspace=0.35, wspace=0.3)
+        plt.savefig(perf_dir + 'convergence_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        # Print summary statistics
+        print(f"\n=== Convergence Analysis Summary ===")
+        print(f"Tolerance used: {tolerance:.2e}")
+        print(f"LQG+EKF - Avg convergence time: {np.mean(convergence_ekf):.1f} ± {np.std(convergence_ekf):.1f}")
+        print(f"LQG+UKF - Avg convergence time: {np.mean(convergence_ukf):.1f} ± {np.std(convergence_ukf):.1f}")
+        print(f"iLQG+QKF - Avg convergence time: {np.mean(convergence_qkf_num):.1f} ± {np.std(convergence_qkf_num):.1f}")
+        # print(f"Analytic QKF - Avg convergence time: {np.mean(convergence_qkf_analytic):.1f} ± {np.std(convergence_qkf_analytic):.1f}")
+        print(f"Convergence rates: LQG+EKF {conv_percentages[0]:.1f}%, LQG+UKF {conv_percentages[1]:.1f}%, iLQG+QKF {conv_percentages[2]:.1f}%")
+
+    # return cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_ukf_avg
+    return cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_ukf_avg
+
+def nonlinearity_test(H=1000, trials=20):
+    m_scales = [0, 1, 1e1, 1e2, 1e3, 1e4]
+    rand_seed = 100  # use the same base for all m_scales
+    
+    # Store results for plotting
+    all_results = {
+        'm_scales': m_scales,
+        'ekf_costs': [],
+        'ukf_costs': [],
+        'qkf_costs': []
     }
-
-    # Print timing information
-    print(f"\n=== Execution Times (Trial {trial_num}) ===")
-    print(f"QKF + Aug-LQR-Analytic:  {time_A:.4f} seconds")
-    print(f"QKF + Aug-iLQR-Numeric:  {time_B:.4f} seconds")
-    print(f"EKF + Orig-LQR:          {time_C:.4f} seconds")
-    print(f"UKF + Orig-LQR:          {time_D:.4f} seconds")
-    print("=" * 40)
-
-    pkl_path = os.path.join(pkl_dir, f"tracking_{path_type}-{trial_num}.pkl")
-    with open(pkl_path, "wb") as f:
-        pkl.dump(results, f)
-
-    # --- plots ---
-    T = np.arange(H + 1) * dt
-    fig = plt.figure(figsize=(20, 14))
-    gs = fig.add_gridspec(2, 2, hspace=0.5, wspace=0.4)
-
-    # Define consistent colors for each controller
-    colors = {
-        "A": "#1f77b4",  # Blue for QKF + Aug-LQR-Analytic
-        "B": "#ff7f0e",  # Orange for QKF + Aug-iLQR-Numeric  
-        "C": "#2ca02c",  # Green for EKF + Orig-LQR
-        "D": "#d62728"   # Red for UKF + Orig-LQR
-    }
-
-    # Helper function to get line style based on divergence
-    def get_line_style(controller_key):
-        return '--' if results[controller_key]["is_diverged"] else '-'
-
-    # 1) XY path
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax1.plot(ref['x'], ref['y'], '--', lw=1.2, alpha=0.7, label="Reference (global)", color='gray')
-    # plot the anchor points (show every 20th point to avoid overcrowding)
-    step_size = max(1, len(ref['x']) // 20)  # Show at most 20 anchor points
-    ax1.plot(ref['x'][::step_size], ref['y'][::step_size], 'o', lw=1.2, alpha=0.7, color='gray', markersize=3)
-
-    # plot reference trajectory with consistent colors and dashed lines for diverged controllers
-    ax1.plot(np.array(results["A"]["traj_x"], dtype=float),
-             np.array(results["A"]["traj_y"], dtype=float),
-             get_line_style("A"), lw=2.0, label=results["A"]["label"], color=colors["A"])
-    ax1.plot(np.array(results["B"]["traj_x"], dtype=float),
-             np.array(results["B"]["traj_y"], dtype=float),
-             get_line_style("B"), lw=2.0, label=results["B"]["label"], color=colors["B"])
-    ax1.plot(np.array(results["C"]["traj_x"], dtype=float),
-             np.array(results["C"]["traj_y"], dtype=float),
-             get_line_style("C"), lw=2.0, label=results["C"]["label"], color=colors["C"])
-    ax1.plot(np.array(results["D"]["traj_x"], dtype=float),
-             np.array(results["D"]["traj_y"], dtype=float),
-             get_line_style("D"), lw=2.0, label=results["D"]["label"], color=colors["D"])
-
-    ax1.set_title("Path Tracking (XY)")
-    ax1.set_xlabel("x")
-    ax1.set_ylabel("y")
-    ax1.axis("equal")
-    ax1.grid(True, ls=":")
-    ax1.legend(loc='best', fontsize=9, ncol=1, framealpha=0.9)
-
-    # 2) Cost plot (overall cumulative cost)
-    ax2 = fig.add_subplot(gs[0, 1])
-    ax2.plot(T, results["A"]["cost_to_go"], get_line_style("A"), lw=1.5, label=results["A"]["label"], color=colors["A"])
-    ax2.plot(T, results["B"]["cost_to_go"], get_line_style("B"), lw=1.5, label=results["B"]["label"], color=colors["B"])
-    ax2.plot(T, results["C"]["cost_to_go"], get_line_style("C"), lw=1.5, label=results["C"]["label"], color=colors["C"])
-    ax2.plot(T, results["D"]["cost_to_go"], get_line_style("D"), lw=1.5, label=results["D"]["label"], color=colors["D"])
-    ax2.set_title("Overall Cumulative Cost")
-    ax2.set_xlabel("time [s]"); ax2.set_ylabel("Cumulative Cost")
-    ax2.grid(True, ls=":"); ax2.legend(loc='best', fontsize=9, ncol=1, framealpha=0.9)
-
-    # 3) Tracking error
-    ax3 = fig.add_subplot(gs[1, 0])
-    ax3.plot(T, results["A"]["track_err"], get_line_style("A"), lw=1.5, label=results["A"]["label"], color=colors["A"])
-    ax3.plot(T, results["B"]["track_err"], get_line_style("B"), lw=1.5, label=results["B"]["label"], color=colors["B"])
-    ax3.plot(T, results["C"]["track_err"], get_line_style("C"), lw=1.5, label=results["C"]["label"], color=colors["C"])
-    ax3.plot(T, results["D"]["track_err"], get_line_style("D"), lw=1.5, label=results["D"]["label"], color=colors["D"])
-    ax3.set_title("Tracking Error ‖x - x_ref‖")
-    ax3.set_xlabel("time [s]"); ax3.set_ylabel("error")
-    ax3.grid(True, ls=":"); ax3.legend(loc='best', fontsize=9, ncol=1, framealpha=0.9)
-
-    # 4) Estimation RMSE
-    ax4 = fig.add_subplot(gs[1, 1])
-    ax4.plot(T, results["A"]["rmse"], get_line_style("A"), lw=1.5, label=results["A"]["label"], color=colors["A"])
-    ax4.plot(T, results["B"]["rmse"], get_line_style("B"), lw=1.5, label=results["B"]["label"], color=colors["B"])
-    ax4.plot(T, results["C"]["rmse"], get_line_style("C"), lw=1.5, label=results["C"]["label"], color=colors["C"])
-    ax4.plot(T, results["D"]["rmse"], get_line_style("D"), lw=1.5, label=results["D"]["label"], color=colors["D"])
-    ax4.set_title("Estimation RMSE ‖x - x̂‖")
-    ax4.set_xlabel("time [s]"); ax4.set_ylabel("RMSE")
-    ax4.grid(True, ls=":"); ax4.legend(loc='best', fontsize=9, ncol=1, framealpha=0.9)
-
-    # Add divergence info to title
-    divergence_info = []
-    for key, controller in [("A", "QKF+Aug-LQR"), ("B", "QKF+Aug-iLQR"), ("C", "EKF+Orig-LQR"), ("D", "UKF+Orig-LQR")]:
-        if results[key]["is_diverged"]:
-            divergence_info.append(f"{controller} (DIVERGED at step {results[key]['divergence_step']})")
-        else:
-            divergence_info.append(controller)
     
-    title = f"LQG Path Tracking — {path_type}  ({', '.join(divergence_info)})"
-    fig.suptitle(title, y=0.95, fontsize=12)
+    for i, m_scale in enumerate(m_scales):
+        print(f"Testing with m_scale={m_scale}")
+        cost_list_ekf_avg, cost_list_qkf_num_avg, cost_list_ukf_avg = test(H=H, trials=trials, plot=False, m_scale=m_scale, rand_seed=rand_seed)
+        
+        # Store average final costs for comparison
+        all_results['ekf_costs'].append(np.mean(cost_list_ekf_avg[-100:]))  # Last 100 steps average
+        all_results['ukf_costs'].append(np.mean(cost_list_ukf_avg[-100:]))
+        all_results['qkf_costs'].append(np.mean(cost_list_qkf_num_avg[-100:]))
     
-    # Use subplots_adjust for more reliable layout without warnings
-    fig.subplots_adjust(left=0.08, right=0.95, top=0.93, bottom=0.08, hspace=0.5, wspace=0.4)
+    # Plot nonlinearity analysis results
+    plot_nonlinearity_analysis(all_results)
+    
+    return all_results
 
-    fig_path = os.path.join(perf_dir, f"tracking_{path_type}-{trial_num}.png")
-    fig.savefig(fig_path, dpi=200, bbox_inches='tight')
-    # plt.show()
+
+def plot_nonlinearity_analysis(results):
+    """
+    Create publication-ready plots for nonlinearity analysis.
+    
+    Args:
+        results: Dictionary containing m_scales and cost data for each method
+    """
+    # Create figure with publication-ready styling
+    fig, ax = plt.subplots(figsize=(8, 6))
+    # Subplot 2: Cost vs Nonlinearity (log scale for better visualization)
+    ax.set_title('Cost Performance vs. Nonlinearity', fontsize=20, fontweight='bold', pad=15)
+    ax.set_xlabel('Nonlinearity Scale (m_scale)', fontsize=20, fontweight='bold')
+    ax.set_ylabel('Average Final Cost', fontsize=20, fontweight='bold')
+    
+    # Plot with enhanced styling
+    ax.loglog(results['m_scales'], results['ekf_costs'],  
+               label='LQG+EKF', color=PUBLICATION_COLORS['ekf'], 
+               marker='o', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    ax.loglog(results['m_scales'], results['ukf_costs'], 
+               label='LQG+UKF', color=PUBLICATION_COLORS['ukf'], 
+               marker='s', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    ax.loglog(results['m_scales'], results['qkf_costs'], 
+               label='iLQG+QKF', color=PUBLICATION_COLORS['qkf'], 
+               marker='^', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=11)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.tick_params(axis='both', which='major', labelsize=10)
+    
+    # Adjust layout and save
+    plt.tight_layout()
+    plt.savefig(perf_dir + 'nonlinearity_analysis.png', dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"\n=== Nonlinearity Analysis Summary ===")
+    print(f"Nonlinearity scales tested: {results['m_scales']}")
+    print(f"EKF final costs: {[f'{cost:.2e}' for cost in results['ekf_costs']]}")
+    print(f"UKF final costs: {[f'{cost:.2e}' for cost in results['ukf_costs']]}")
+    print(f"QKF final costs: {[f'{cost:.2e}' for cost in results['qkf_costs']]}")
 
 
 if __name__ == "__main__":
-    one_trial()
+    test(H=1000, trials=1, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    # nonlinearity_test(H=1000, trials=10)
+        
+
+
+

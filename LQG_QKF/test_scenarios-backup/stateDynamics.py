@@ -102,6 +102,12 @@ class StateDynamics(object):
     '''
     return self.x 
   
+  def set_x(self, x):
+    '''
+    set state vector
+    '''
+    self.x = x
+  
   def set_u(self, u):
     '''
     set control input vector
