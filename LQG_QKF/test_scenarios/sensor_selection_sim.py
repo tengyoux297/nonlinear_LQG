@@ -25,7 +25,8 @@ os.makedirs(perf_dir, exist_ok=True)
 class SensorSelectionSimulator(LQG):
     def __init__(self, n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H = 50, 
                  filter_type: Literal['qkf', 'ekf', 'kf', 'ukf'] = 'qkf',
-                 lqr_type: Literal['orig', 'aug_analytic', 'aug_numeric', 'None'] = 'orig'):
+                 lqr_type: Literal['orig', 'aug_analytic', 'aug_numeric', 'None'] = 'orig',
+                 max_sensors=None):
         
         self.filter_type = filter_type
         self.lqr_type = lqr_type
@@ -75,6 +76,10 @@ class SensorSelectionSimulator(LQG):
         # lqe
         self.P_est = np.eye(self.n) * small_value  # estimation error covariance matrix 
         
+        # sensor selection
+        self.max_sensors = max_sensors if max_sensors is not None else self.sensor.m
+        self.active_sensors = list(range(min(self.sensor.m, self.max_sensors)))  # Initialize with max allowed sensors
+        
         # performance tracking
         self.performance_history = {
             'cost': [],
@@ -88,76 +93,64 @@ class SensorSelectionSimulator(LQG):
     def get_next_sensor_selection(self):
         """
         Compute next sensor selection using greedy algorithm.
-        Selects sensor configuration that maximizes information gain or minimizes uncertainty.
-        Returns the goal state based on the selected sensor configuration.
+        Selects a subset of sensors that maximizes information gain.
+        Returns the selected sensor indices and goal state.
         """
         # Get current state estimate
         x_current = self.x_hat
         
-        # Define possible sensor configurations (simplified example)
-        # In practice, this could be more sophisticated based on available sensors
-        sensor_configs = self._generate_sensor_configurations()
+        # Generate all possible sensor subsets (binary combinations)
+        sensor_subsets = self._generate_sensor_subsets()
         
-        best_config = None
+        best_subset = None
         best_value = -np.inf
         info_gains = []
         
-        # Greedy selection: choose configuration that maximizes information gain
-        for config in sensor_configs:
-            # Calculate information gain for this configuration
-            info_gain = self._calculate_information_gain(config, x_current)
+        # Greedy selection: choose sensor subset that maximizes information gain
+        for subset in sensor_subsets:
+            # Calculate information gain for this sensor subset
+            info_gain = self._calculate_information_gain_subset(subset, x_current)
             info_gains.append(info_gain)
             
             if info_gain > best_value:
                 best_value = info_gain
-                best_config = config
+                best_subset = subset
         
         # Record sensor selection performance
-        self.performance_history['sensor_selections'].append(best_config['type'])
+        self.performance_history['sensor_selections'].append(best_subset)
         self.performance_history['information_gains'].append(info_gains)
         
-        # Generate goal state based on selected sensor configuration
-        goal_state = self._generate_goal_from_config(best_config, x_current)
+        # Update active sensors
+        self.active_sensors = best_subset
+        
+        # Generate goal state based on selected sensors
+        goal_state = self._generate_goal_from_sensors(best_subset, x_current)
         
         return goal_state
     
-    def _generate_sensor_configurations(self):
+    def _generate_sensor_subsets(self):
         """
-        Generate possible sensor configurations.
-        This is a simplified example - in practice, this would depend on
-        the specific sensor setup and constraints.
+        Generate all possible sensor subsets (binary combinations).
+        Each subset represents which sensors are active (ON) or inactive (OFF).
+        Respects the max_sensors constraint.
         """
-        configs = []
+        import itertools
         
-        # Configuration 1: Focus on earth state (first n1 components)
-        config1 = {
-            'type': 'earth_focus',
-            'target_components': list(range(self.n1)),
-            'weight': 1.0
-        }
-        configs.append(config1)
+        # Get total number of sensors and max allowed
+        num_sensors = self.sensor.m  # Number of available sensors
+        max_allowed = min(num_sensors, self.max_sensors)  # Respect max_sensors constraint
         
-        # Configuration 2: Focus on sensor state (last n2 components)  
-        config2 = {
-            'type': 'sensor_focus',
-            'target_components': list(range(self.n1, self.n)),
-            'weight': 1.0
-        }
-        configs.append(config2)
+        # Generate all possible subsets (including empty set and up to max_allowed)
+        subsets = []
+        for r in range(max_allowed + 1):  # 0 to max_allowed sensors
+            for subset in itertools.combinations(range(num_sensors), r):
+                subsets.append(list(subset))
         
-        # Configuration 3: Balanced approach
-        config3 = {
-            'type': 'balanced',
-            'target_components': list(range(self.n)),
-            'weight': 0.5
-        }
-        configs.append(config3)
-        
-        return configs
+        return subsets
     
-    def _calculate_information_gain(self, config, x_current):
+    def _calculate_information_gain_subset(self, sensor_subset, x_current):
         """
-        Calculate information gain for a given sensor configuration.
+        Calculate information gain for a given sensor subset.
         Uses trace of covariance matrix as uncertainty measure.
         """
         # Get current uncertainty (trace of covariance matrix)
@@ -166,44 +159,61 @@ class SensorSelectionSimulator(LQG):
         else:
             current_uncertainty = np.trace(self.P_est)
         
-        # Simulate information gain based on configuration
-        # Higher weight on target components leads to more information gain
-        target_components = config['target_components']
-        weight = config['weight']
+        # Calculate information gain based on sensor subset
+        num_active_sensors = len(sensor_subset)
+        total_sensors = self.sensor.m
         
-        # Calculate information gain as reduction in uncertainty
-        # This is a simplified model - in practice, you'd compute the actual
-        # posterior covariance after incorporating the sensor measurement
-        info_gain = weight * len(target_components) / self.n * current_uncertainty
+        # Information gain increases with number of active sensors
+        # but with diminishing returns (logarithmic scaling)
+        if num_active_sensors == 0:
+            info_gain = 0.0
+        else:
+            # Logarithmic scaling to model diminishing returns
+            info_gain = current_uncertainty * np.log(1 + num_active_sensors) / np.log(1 + total_sensors)
         
-        # Add some randomness to avoid always selecting the same configuration
-        info_gain += np.random.normal(0, 0.1 * info_gain)
+        # Add some randomness to avoid always selecting the same subset
+        # info_gain += np.random.normal(0, 0.05 * info_gain)
         
         return info_gain
     
-    def _generate_goal_from_config(self, config, x_current):
+    def _generate_goal_from_sensors(self, sensor_subset, x_current):
         """
-        Generate goal state based on selected sensor configuration.
+        Generate goal state based on selected sensor subset.
         """
         goal_state = x_current.copy()
         
-        if config['type'] == 'earth_focus':
-            # Goal: move earth state towards zero, keep sensor state as is
-            goal_state[:self.n1] = np.zeros((self.n1, 1))
-            
-        elif config['type'] == 'sensor_focus':
-            # Goal: move sensor state towards zero, keep earth state as is
-            goal_state[self.n1:] = np.zeros((self.n2, 1))
-            
-        elif config['type'] == 'balanced':
-            # Goal: move entire state towards zero
-            goal_state = np.zeros((self.n, 1))
-            
+        # Simple goal: move towards zero with intensity based on number of active sensors
+        num_active_sensors = len(sensor_subset)
+        total_sensors = self.sensor.m
+        
+        if num_active_sensors == 0:
+            # No sensors active: maintain current state
+            goal_state = x_current.copy()
+        else:
+            # More active sensors = more aggressive control towards zero
+            control_strength = num_active_sensors / total_sensors
+            goal_state = (1 - control_strength) * x_current + control_strength * np.zeros((self.n, 1))
+        
         # Add some small random perturbation to avoid getting stuck
         noise_scale = 0.1
         goal_state += np.random.normal(0, noise_scale, goal_state.shape)
         
         return goal_state
+    
+    def get_active_measurement_model(self):
+        """
+        Get measurement model using only active sensors.
+        """
+        if not self.active_sensors:
+            # No sensors active - return zero measurement
+            return np.zeros((0, 1)), np.zeros((0, 0))
+        
+        # Get measurement matrices for active sensors only
+        C_active = self.sensor.C[self.active_sensors, :]
+        M_active = self.sensor.M[self.active_sensors, :, :]
+        V_active = self.sensor.V[np.ix_(self.active_sensors, self.active_sensors)]
+        
+        return C_active, M_active, V_active
     
     def run_sim(self):
         """
@@ -360,12 +370,12 @@ class SensorSelectionSimulator(LQG):
         return filepath
 
 
-def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, rand_seed=random_seed):
+def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, num_sensors=2, max_sensors=None, rand_seed=random_seed, plot=True):
     n1 = 2
     n2 = 2
     n = n1 + n2 # state size
     p = 3
-    m = 2
+    m = num_sensors  # number of sensors
     
     if rand_seed is not None:
         np.random.seed(rand_seed)
@@ -393,24 +403,24 @@ def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0
     simulators = {}
     
     print("Running EKF simulation...")
-    lqg_ekf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ekf', lqr_type='orig')
+    lqg_ekf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ekf', lqr_type='orig', max_sensors=max_sensors)
     err_list_ekf, var_list_ekf, cost_list_ekf = lqg_ekf.run_sim()
     simulators['ekf'] = lqg_ekf
     
+    print("Running UKF simulation...")
+    lqg_ukf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ukf', lqr_type='orig', max_sensors=max_sensors)
+    err_list_ukf, var_list_ukf, cost_list_ukf = lqg_ukf.run_sim()
+    simulators['ukf'] = lqg_ukf
+    
     print("Running QKF with augmented numeric LQR...")
-    lqg_qkf_aug_num = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_numeric')
+    lqg_qkf_aug_num = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_numeric', max_sensors=max_sensors)
     err_list_aug_num, var_list_aug_num, cost_list_aug_num = lqg_qkf_aug_num.run_sim()
     simulators['qkf_aug_num'] = lqg_qkf_aug_num
     
     print("Running QKF with augmented analytic LQR...")
-    lqg_qkf_aug_analytic = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_analytic')
+    lqg_qkf_aug_analytic = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_analytic', max_sensors=max_sensors)
     err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic = lqg_qkf_aug_analytic.run_sim()
     simulators['qkf_aug_analytic'] = lqg_qkf_aug_analytic
-    
-    print("Running UKF simulation...")
-    lqg_ukf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ukf', lqr_type='orig')
-    err_list_ukf, var_list_ukf, cost_list_ukf = lqg_ukf.run_sim()
-    simulators['ukf'] = lqg_ukf
     
     # Save results for each simulator
     print("\nSaving simulation results...")
@@ -418,57 +428,130 @@ def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0
         print(f"Saving {name} results...")
         simulator.save_results()
     
+    all_results = [err_list_ekf, var_list_ekf, cost_list_ekf],  [err_list_ukf, var_list_ukf, cost_list_ukf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic]
     # Create comparison plots only
-    plot_comparison(simulators, save_plots=True)
+    if plot:
+        plot_comparison(all_results, save_plots=True)
     
-    return [err_list_ekf, var_list_ekf, cost_list_ekf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic], [err_list_ukf, var_list_ukf, cost_list_ukf]
+    return all_results
+
+system_names = ['ekf', 'ukf', 'qkf_aug_num', 'qkf_aug_analytic']
+sensor_update_interval = 10
+
+def get_cost_to_go(cost_list):
+    cost_to_go = []
+    for j in range(len(cost_list)):
+        cost_to_go.append(np.sum(cost_list[j:]))
+    return cost_to_go
 
 
-def plot_comparison(simulators, save_plots=True, plot_dir=perf_dir):
+def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir):
     """
     Create simple comparison plots across different filter types.
     """
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
     
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     fig.suptitle('Sensor Selection Performance Comparison', fontsize=14)
     
     colors = ['blue', 'red', 'green', 'orange']
     linestyles = ['-', '--', '-.', ':']
     
-    # 1. Cost-to-go comparison
-    for i, (name, sim) in enumerate(simulators.items()):
-        time_steps = np.arange(1, len(sim.performance_history['cost']) + 1)
+    # 1. Cost-to-go comparison (top left)
+    for i, result in enumerate(all_results):
+        cost_list = result[2]
+        time_steps = np.arange(1, len(result[2]) + 1)
         # Calculate cost-to-go for this simulator
         cost_to_go = []
-        for j in range(len(sim.performance_history['cost'])):
-            cost_to_go.append(np.sum(sim.performance_history['cost'][j:]))
+        for j in range(len(cost_list)):
+            cost_to_go.append(np.sum(cost_list[j:]))
+        name = system_names[i]
+        axes[0, 0].plot(time_steps, cost_to_go, 
+                    color=colors[i % len(colors)], 
+                    linestyle=linestyles[i % len(linestyles)],
+                    label=name, linewidth=2)
+    
+    axes[0, 0].set_title('Cost-to-Go Comparison')
+    axes[0, 0].set_xlabel('Time Step')
+    axes[0, 0].set_ylabel('Cost-to-Go (log scale)')
+    axes[0, 0].set_yscale('log')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+    
+    # 2. Staged cost-to-go comparison (top right)
+    for i, result in enumerate(all_results):
+        cost_list = result[2]
+        time_steps = np.arange(1, len(result[2]) + 1)
         
-        axes[0].plot(time_steps, cost_to_go, 
+        # Calculate staged cost-to-go for each goal state phase
+        staged_costs = []
+        
+        # Group costs by sensor selection phases
+        phase_costs = []
+        staged_costs = []
+        for j, cost in enumerate(cost_list):
+            phase_costs.append(cost)
+            
+            # Check if we're at a sensor selection update point
+            if (j + 1) % sensor_update_interval == 0:
+                # Calculate cost accumulated during this phase only
+                staged_costs.append(phase_costs)
+                phase_costs = []  # Reset for next phase
+        
+        # Handle remaining costs if simulation doesn't end at sensor update
+        if phase_costs:
+            phase_cost = np.sum(phase_costs)
+            staged_costs.append(phase_cost)
+        
+        # Plot staged costs - use phase indices (0, 1, 2, ...)
+        staged_cost_to_go = []
+        # print(len(staged_costs))
+        for staged_costs in staged_costs:
+            staged_cost_to_go.append(get_cost_to_go(staged_costs))
+        staged_cost_to_go = np.concatenate(staged_cost_to_go)
+        name = system_names[i]
+        phase_indices = np.arange(len(staged_cost_to_go))
+        
+        axes[0, 1].plot(phase_indices, staged_cost_to_go, 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=name, linewidth=2)
+                    label=name, linewidth=2, marker='o', markersize=1)
     
-    axes[0].set_title('Cost-to-Go Comparison')
-    axes[0].set_xlabel('Time Step')
-    axes[0].set_ylabel('Cost-to-Go')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
+    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)')
+    axes[0, 1].set_xlabel('Phase Index')
+    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)')
+    axes[0, 1].set_yscale('log')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
     
-    # 2. Estimation error comparison
-    for i, (name, sim) in enumerate(simulators.items()):
-        time_steps = np.arange(1, len(sim.performance_history['estimation_error']) + 1)
-        axes[1].plot(time_steps, sim.performance_history['estimation_error'], 
+    # 3. Estimation error comparison (bottom left)
+    for i, result in enumerate(all_results):
+        time_steps = np.arange(1, len(result[0]) + 1)
+        axes[1, 0].plot(time_steps, result[0], 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=name, linewidth=2)
+                    label=system_names[i], linewidth=2)
     
-    axes[1].set_title('Estimation Error Comparison')
-    axes[1].set_xlabel('Time Step')
-    axes[1].set_ylabel('||x_true - x_est||')
-    axes[1].legend()
-    axes[1].grid(True, alpha=0.3)
+    axes[1, 0].set_title('Estimation Error Comparison')
+    axes[1, 0].set_xlabel('Time Step')
+    axes[1, 0].set_ylabel('||x_true - x_est||')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+    
+    # 4. Estimation variance comparison (bottom right)
+    for i, result in enumerate(all_results):
+        time_steps = np.arange(1, len(result[1]) + 1)
+        axes[1, 1].plot(time_steps, result[1], 
+                    color=colors[i % len(colors)], 
+                    linestyle=linestyles[i % len(linestyles)],
+                    label=system_names[i], linewidth=2)
+    
+    axes[1, 1].set_title('Estimation Variance Comparison')
+    axes[1, 1].set_xlabel('Time Step')
+    axes[1, 1].set_ylabel('tr(P)')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
     
     plt.tight_layout()
     
@@ -481,5 +564,45 @@ def plot_comparison(simulators, save_plots=True, plot_dir=perf_dir):
     plt.show()
     return fig
 
+import random
+def run_comprehensive_test(n_trials=1, num_sensors=6, max_sensors=3, plot=True):
+    all_ekf_results = []
+    all_ukf_results = []
+    all_qkf_num_results = []
+    all_qkf_analytic_results = []
+    for i in range(n_trials):
+        seed_i = random.randint(0, 1000000)
+        ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False)
+        
+        # append results
+        all_ekf_results.append(ekf_result)
+        all_ukf_results.append(ukf_result)
+        all_qkf_num_results.append(qkf_num_result)
+        all_qkf_analytic_results.append(qkf_analytic_result)
+    
+    # average on all trials
+    all_ekf_results = np.array(all_ekf_results)
+    all_ukf_results = np.array(all_ukf_results)
+    all_qkf_num_results = np.array(all_qkf_num_results)
+    all_qkf_analytic_results = np.array(all_qkf_analytic_results)
+    
+    avg_all_ekf_results = np.mean(all_ekf_results, axis=0)
+    avg_all_ukf_results = np.mean(all_ukf_results, axis=0)
+    avg_all_qkf_num_results = np.mean(all_qkf_num_results, axis=0)
+    avg_all_qkf_analytic_results = np.mean(all_qkf_analytic_results, axis=0)
+    
+    
+    avg_all_results = [avg_all_ekf_results, avg_all_ukf_results, avg_all_qkf_num_results, avg_all_qkf_analytic_results]
+    if plot:
+        plot_comparison(avg_all_results, save_plots=True)
+    
+    
+    return avg_all_results
+
+
 if __name__ == "__main__":
-    run_sensor_scheduling_sim()
+    # Run single trial (original behavior)
+    # run_sensor_scheduling_sim(num_sensors=6, max_sensors=3)
+    
+    # Run comprehensive test with multiple trials
+    run_comprehensive_test(n_trials=3, num_sensors=6, max_sensors=3, plot=True)
