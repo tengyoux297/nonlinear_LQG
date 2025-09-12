@@ -13,7 +13,6 @@ import numpy as np
 
 random_seed = 42
 small_value = 1e-6
-sensor_update_interval = 10
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 pkl_dir = 'pkl/'
@@ -23,10 +22,11 @@ os.makedirs(perf_dir, exist_ok=True)
 
 # build sensor selection simulator
 class SensorSelectionSimulator(LQG):
-    def __init__(self, n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H = 50, 
+    def __init__(self, n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H = 50, m_scale=1e2,
                  filter_type: Literal['qkf', 'ekf', 'kf', 'ukf'] = 'qkf',
                  lqr_type: Literal['orig', 'aug_analytic', 'aug_numeric', 'None'] = 'orig',
-                 max_sensors=None):
+                 max_sensors=None,
+                 update_interval=10):
         
         self.filter_type = filter_type
         self.lqr_type = lqr_type
@@ -35,6 +35,8 @@ class SensorSelectionSimulator(LQG):
         n = n1 + n2 # state size
         
         # sensor settings
+        self.m_scale = m_scale
+        M = M * m_scale
         self.sensor = sensor(C, M, V)
         self.V = self.sensor.get_V()
         
@@ -49,6 +51,7 @@ class SensorSelectionSimulator(LQG):
         self.n = n
         self.p = self.F.get_input_size() # control input size
         self.W = self.F.get_W()
+        self.update_interval = update_interval
         
         # augmented state settings
         mu_tilde_u = (np.eye(n+n**2) - self.F.get_A_tilde()).T @ self.F.get_mu_tilde() # shape (n+n^2, 1)
@@ -226,7 +229,7 @@ class SensorSelectionSimulator(LQG):
             self.update_lqe()
             
             # Update sensor selection periodically
-            if step % sensor_update_interval == 0:
+            if step % self.update_interval == 0:
                 self.x_goal = self.get_next_sensor_selection()
             
             # Update control and forward dynamics
@@ -344,8 +347,7 @@ class SensorSelectionSimulator(LQG):
             os.makedirs(save_dir)
         
         if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"sensor_selection_results_{self.filter_type}_{self.lqr_type}_{timestamp}.pkl"
+            filename = f"sensor_selection_results_{self.filter_type}_{self.lqr_type}_mscale={int(self.m_scale)}.pkl"
         
         filepath = os.path.join(save_dir, filename)
         
@@ -370,7 +372,7 @@ class SensorSelectionSimulator(LQG):
         return filepath
 
 
-def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0, num_sensors=2, max_sensors=None, rand_seed=random_seed, plot=True):
+def run_sensor_scheduling_sim(H=1000, update_interval=10, noise_scale=1e-1, m_scale=1e0, Q_scale=1.0, R_scale=1.0, num_sensors=2, max_sensors=None, rand_seed=random_seed, plot=True):
     n1 = 2
     n2 = 2
     n = n1 + n2 # state size
@@ -403,22 +405,22 @@ def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0
     simulators = {}
     
     print("Running EKF simulation...")
-    lqg_ekf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ekf', lqr_type='orig', max_sensors=max_sensors)
+    lqg_ekf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='ekf', lqr_type='orig', max_sensors=max_sensors, update_interval=update_interval)
     err_list_ekf, var_list_ekf, cost_list_ekf = lqg_ekf.run_sim()
     simulators['ekf'] = lqg_ekf
     
     print("Running UKF simulation...")
-    lqg_ukf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='ukf', lqr_type='orig', max_sensors=max_sensors)
+    lqg_ukf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='ukf', lqr_type='orig', max_sensors=max_sensors, update_interval=update_interval)
     err_list_ukf, var_list_ukf, cost_list_ukf = lqg_ukf.run_sim()
     simulators['ukf'] = lqg_ukf
     
     print("Running QKF with augmented numeric LQR...")
-    lqg_qkf_aug_num = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_numeric', max_sensors=max_sensors)
+    lqg_qkf_aug_num = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='qkf', lqr_type='aug_numeric', max_sensors=max_sensors, update_interval=update_interval)
     err_list_aug_num, var_list_aug_num, cost_list_aug_num = lqg_qkf_aug_num.run_sim()
     simulators['qkf_aug_num'] = lqg_qkf_aug_num
     
     print("Running QKF with augmented analytic LQR...")
-    lqg_qkf_aug_analytic = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, filter_type='qkf', lqr_type='aug_analytic', max_sensors=max_sensors)
+    lqg_qkf_aug_analytic = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='qkf', lqr_type='aug_analytic', max_sensors=max_sensors, update_interval=update_interval)
     err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic = lqg_qkf_aug_analytic.run_sim()
     simulators['qkf_aug_analytic'] = lqg_qkf_aug_analytic
     
@@ -431,7 +433,7 @@ def run_sensor_scheduling_sim(H=1000, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0
     all_results = [err_list_ekf, var_list_ekf, cost_list_ekf],  [err_list_ukf, var_list_ukf, cost_list_ukf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic]
     # Create comparison plots only
     if plot:
-        plot_comparison(all_results, save_plots=True)
+        plot_comparison(all_results, save_plots=True, update_interval=update_interval)
     
     return all_results
 
@@ -445,7 +447,7 @@ def get_cost_to_go(cost_list):
     return cost_to_go
 
 
-def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir):
+def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_interval=10):
     """
     Create simple comparison plots across different filter types.
     """
@@ -494,7 +496,7 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir):
             phase_costs.append(cost)
             
             # Check if we're at a sensor selection update point
-            if (j + 1) % sensor_update_interval == 0:
+            if (j + 1) % update_interval == 0:
                 # Calculate cost accumulated during this phase only
                 staged_costs.append(phase_costs)
                 phase_costs = []  # Reset for next phase
@@ -565,14 +567,14 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir):
     return fig
 
 import random
-def run_comprehensive_test(n_trials=1, num_sensors=6, max_sensors=3, plot=True):
+def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6, max_sensors=3, plot=True, m_scale=1e0):
     all_ekf_results = []
     all_ukf_results = []
     all_qkf_num_results = []
     all_qkf_analytic_results = []
     for i in range(n_trials):
         seed_i = random.randint(0, 1000000)
-        ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False)
+        ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False, update_interval=update_interval, m_scale=m_scale)
         
         # append results
         all_ekf_results.append(ekf_result)
@@ -594,15 +596,22 @@ def run_comprehensive_test(n_trials=1, num_sensors=6, max_sensors=3, plot=True):
     
     avg_all_results = [avg_all_ekf_results, avg_all_ukf_results, avg_all_qkf_num_results, avg_all_qkf_analytic_results]
     if plot:
-        plot_comparison(avg_all_results, save_plots=True)
+        plot_comparison(avg_all_results, save_plots=True, update_interval=update_interval)
     
     
     return avg_all_results
 
+def run_nonlinearity_test(nonlinearity_factors=[1e-2, 1, 1e2], n_trials=5, H=1000, update_interval=100, num_sensors=6, max_sensors=3, plot=True):
+    for m_scale in nonlinearity_factors:
+        run_comprehensive_test(n_trials=n_trials, H=H, update_interval=update_interval, num_sensors=num_sensors, max_sensors=max_sensors, plot=plot, m_scale=m_scale)
 
 if __name__ == "__main__":
     # Run single trial (original behavior)
     # run_sensor_scheduling_sim(num_sensors=6, max_sensors=3)
     
     # Run comprehensive test with multiple trials
-    run_comprehensive_test(n_trials=3, num_sensors=6, max_sensors=3, plot=True)
+    # run_comprehensive_test(n_trials=20, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
+    
+    # Run nonlinearity test
+    nonlinearity_factors = [1e-2, 1, 1e1, 1e2, 1e3]
+    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=20, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
