@@ -383,7 +383,7 @@ class LQG:
         self.F.set_u(u_new)
         return
     
-    def update_lqr_analytic(self, goal_state, infinite_horizon=False):
+    def update_lqr_analytic(self, goal_state):
         # LQG update only with augmented state
         I_p = np.eye(self.p)  # shape (p, p)
         I_p2 = np.eye(self.p ** 2)  # shape (p^2, p^2)
@@ -411,14 +411,17 @@ class LQG:
                 T[:, i * self.p + j] = vec_e_ij
 
         M = np.kron(B, B) @ (I_p2 + T) # shape (n^2, p^2)
-        q = Vec(self.Q) # shape (n^2, 1)
+        q = Vec(self.Q[:self.n, :self.n]) # shape (n^2, 1)
         
         S = np.zeros((self.p, self.p))  # shape (p, p)
         for i in range(self.p):
             e_i = np.zeros((self.p, 1)) # shape (p, 1)
             e_i[i] = 1
             term1 = (M @ np.kron(e_i, I_p)) # shape (n^2, p)
-            term2 = term1 @ q @ e_i.T  # shape (p, p)
+            # print(f"term1: {term1.shape}")
+            # print(f"q: {q.shape}")
+            # print(f"e_i: {e_i.shape}")
+            term2 = term1.T @ q @ e_i.T  # shape (p, p)
             S += term2  # accumulate over p columns
 
         # Z = np.kron(A, B) @ np.kron(x, I_p)   + np.kron(B, A) @ np.kron(I_p, x) # shape (n^2, p)
@@ -451,8 +454,8 @@ class LQG:
                     # self.update_lqr_newton(goal_state, infinite_horizon=False)
                     self.update_ilqr(goal_state, alpha=1)
                 if self.lqr_type == 'aug_analytic':
-                    # self.update_lqr_analytic(goal_state, infinite_horizon=False)
-                    self.update_ilqr(goal_state, alpha=1)
+                    self.update_lqr_analytic(goal_state)
+                    # self.update_ilqr(goal_state, alpha=1)
                 elif self.lqr_type == 'orig':
                     self.update_lqr_orig(goal_state)
             else:

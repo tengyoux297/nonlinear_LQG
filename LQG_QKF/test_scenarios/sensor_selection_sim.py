@@ -90,7 +90,8 @@ class SensorSelectionSimulator(LQG):
             'control_effort': [],
             'sensor_selections': [],
             'information_gains': [],
-            'covariance_traces': []
+            'covariance_traces': [],
+            'time_consumption': []
         } 
         
     def get_next_sensor_selection(self):
@@ -224,7 +225,10 @@ class SensorSelectionSimulator(LQG):
         """
         print(f"Starting sensor selection simulation with {self.filter_type} filter and {self.lqr_type} LQR...")
         
-        for step in tqdm(range(1, self.H + 1, 1), desc="Simulation Progress"):
+        for step in tqdm(range(1, self.H + 1, 1), desc=f"Running simulation with filter:[{self.filter_type}], controller:[{self.lqr_type}], m_scale:[{self.m_scale}]"):
+            import time
+            step_start_time = time.time()
+            
             # Update state estimation
             self.update_lqe()
             
@@ -240,6 +244,11 @@ class SensorSelectionSimulator(LQG):
             # Record comprehensive performance metrics
             self._record_performance_metrics(step)
             
+            # Record time consumption for this step
+            step_end_time = time.time()
+            step_time = step_end_time - step_start_time
+            self.performance_history['time_consumption'].append(step_time)
+            
         # Calculate cost-to-go
         cost_to_go_list = self._calculate_cost_to_go()
         
@@ -252,7 +261,8 @@ class SensorSelectionSimulator(LQG):
         
         return (self.performance_history['estimation_error'], 
                 self.performance_history['covariance_traces'], 
-                cost_to_go_list)
+                cost_to_go_list,
+                self.performance_history['time_consumption'])
     
     def _record_performance_metrics(self, step):
         """Record essential performance metrics for each time step."""
@@ -339,15 +349,17 @@ class SensorSelectionSimulator(LQG):
         plt.show()
         return fig
     
-    def save_results(self, filename=None, save_dir=pkl_dir):
+    def save_results(self, trial_idx=None, save_dir=pkl_dir):
         """
         Save simulation results to pickle file.
         """
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         
-        if filename is None:
-            filename = f"sensor_selection_results_{self.filter_type}_{self.lqr_type}_mscale={int(self.m_scale)}.pkl"
+        if trial_idx is None:
+            filename = f"sensor_selection_results_{self.filter_type}_{self.lqr_type}_mscale={self.m_scale}.pkl"
+        else:
+            filename = f"sensor_selection_results_{self.filter_type}_{self.lqr_type}_mscale={self.m_scale}-trial_{trial_idx}.pkl"
         
         filepath = os.path.join(save_dir, filename)
         
@@ -372,7 +384,7 @@ class SensorSelectionSimulator(LQG):
         return filepath
 
 
-def run_sensor_scheduling_sim(H=1000, update_interval=10, noise_scale=1e-1, m_scale=1e0, Q_scale=1.0, R_scale=1.0, num_sensors=2, max_sensors=None, rand_seed=random_seed, plot=True):
+def run_sensor_scheduling_sim(H=1000, update_interval=10, noise_scale=1e-1, m_scale=1e0, Q_scale=1.0, R_scale=1.0, num_sensors=2, max_sensors=None, rand_seed=random_seed, plot=True, trial_idx=None, save_dir=pkl_dir):
     n1 = 2
     n2 = 2
     n = n1 + n2 # state size
@@ -406,31 +418,31 @@ def run_sensor_scheduling_sim(H=1000, update_interval=10, noise_scale=1e-1, m_sc
     
     print("Running EKF simulation...")
     lqg_ekf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='ekf', lqr_type='orig', max_sensors=max_sensors, update_interval=update_interval)
-    err_list_ekf, var_list_ekf, cost_list_ekf = lqg_ekf.run_sim()
+    err_list_ekf, var_list_ekf, cost_list_ekf, time_list_ekf = lqg_ekf.run_sim()
     simulators['ekf'] = lqg_ekf
     
     print("Running UKF simulation...")
     lqg_ukf = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='ukf', lqr_type='orig', max_sensors=max_sensors, update_interval=update_interval)
-    err_list_ukf, var_list_ukf, cost_list_ukf = lqg_ukf.run_sim()
+    err_list_ukf, var_list_ukf, cost_list_ukf, time_list_ukf = lqg_ukf.run_sim()
     simulators['ukf'] = lqg_ukf
     
     print("Running QKF with augmented numeric LQR...")
     lqg_qkf_aug_num = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='qkf', lqr_type='aug_numeric', max_sensors=max_sensors, update_interval=update_interval)
-    err_list_aug_num, var_list_aug_num, cost_list_aug_num = lqg_qkf_aug_num.run_sim()
+    err_list_aug_num, var_list_aug_num, cost_list_aug_num, time_list_aug_num = lqg_qkf_aug_num.run_sim()
     simulators['qkf_aug_num'] = lqg_qkf_aug_num
     
     print("Running QKF with augmented analytic LQR...")
     lqg_qkf_aug_analytic = SensorSelectionSimulator(n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H=H, m_scale=m_scale, filter_type='qkf', lqr_type='aug_analytic', max_sensors=max_sensors, update_interval=update_interval)
-    err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic = lqg_qkf_aug_analytic.run_sim()
+    err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic, time_list_aug_analytic = lqg_qkf_aug_analytic.run_sim()
     simulators['qkf_aug_analytic'] = lqg_qkf_aug_analytic
     
     # Save results for each simulator
     print("\nSaving simulation results...")
     for name, simulator in simulators.items():
         print(f"Saving {name} results...")
-        simulator.save_results()
-    
-    all_results = [err_list_ekf, var_list_ekf, cost_list_ekf],  [err_list_ukf, var_list_ukf, cost_list_ukf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic]
+        simulator.save_results(trial_idx=trial_idx)
+            
+    all_results = [err_list_ekf, var_list_ekf, cost_list_ekf, time_list_ekf],  [err_list_ukf, var_list_ukf, cost_list_ukf, time_list_ukf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num, time_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic, time_list_aug_analytic]
     # Create comparison plots only
     if plot:
         plot_comparison(all_results, save_plots=True, update_interval=update_interval)
@@ -447,14 +459,14 @@ def get_cost_to_go(cost_list):
     return cost_to_go
 
 
-def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_interval=10):
+def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_interval=10, m_scale=1e0):
     """
     Create simple comparison plots across different filter types.
     """
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
     
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig, axes = plt.subplots(2, 3, figsize=(18, 8))
     fig.suptitle('Sensor Selection Performance Comparison', fontsize=14)
     
     colors = ['blue', 'red', 'green', 'orange']
@@ -527,43 +539,75 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     axes[0, 1].legend()
     axes[0, 1].grid(True, alpha=0.3)
     
-    # 3. Estimation error comparison (bottom left)
+    # 3. Estimation error comparison (top right)
     for i, result in enumerate(all_results):
         time_steps = np.arange(1, len(result[0]) + 1)
-        axes[1, 0].plot(time_steps, result[0], 
+        axes[0, 2].plot(time_steps, result[0], 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
                     label=system_names[i], linewidth=2)
     
-    axes[1, 0].set_title('Estimation Error Comparison')
+    axes[0, 2].set_title('Estimation Error Comparison')
+    axes[0, 2].set_xlabel('Time Step')
+    axes[0, 2].set_ylabel('||x_true - x_est||')
+    axes[0, 2].legend()
+    axes[0, 2].grid(True, alpha=0.3)
+    
+    # 4. Estimation variance comparison (bottom left)
+    for i, result in enumerate(all_results):
+        time_steps = np.arange(1, len(result[1]) + 1)
+        axes[1, 0].plot(time_steps, result[1], 
+                    color=colors[i % len(colors)], 
+                    linestyle=linestyles[i % len(linestyles)],
+                    label=system_names[i], linewidth=2)
+    
+    axes[1, 0].set_title('Estimation Variance Comparison')
     axes[1, 0].set_xlabel('Time Step')
-    axes[1, 0].set_ylabel('||x_true - x_est||')
+    axes[1, 0].set_ylabel('tr(P)')
     axes[1, 0].legend()
     axes[1, 0].grid(True, alpha=0.3)
     
-    # 4. Estimation variance comparison (bottom right)
+    # 5. Time consumption comparison (bottom center)
     for i, result in enumerate(all_results):
-        time_steps = np.arange(1, len(result[1]) + 1)
-        axes[1, 1].plot(time_steps, result[1], 
+        time_steps = np.arange(1, len(result[3]) + 1)
+        axes[1, 1].plot(time_steps, result[3], 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
                     label=system_names[i], linewidth=2)
     
-    axes[1, 1].set_title('Estimation Variance Comparison')
+    axes[1, 1].set_title('Time Consumption Comparison')
     axes[1, 1].set_xlabel('Time Step')
-    axes[1, 1].set_ylabel('tr(P)')
+    axes[1, 1].set_ylabel('Time (seconds)')
     axes[1, 1].legend()
     axes[1, 1].grid(True, alpha=0.3)
+    
+    # 6. Average time consumption comparison (bottom right)
+    avg_times = []
+    for i, result in enumerate(all_results):
+        avg_time = np.mean(result[3])
+        avg_times.append(avg_time)
+    
+    bars = axes[1, 2].bar(system_names, avg_times, color=colors[:len(system_names)])
+    axes[1, 2].set_title('Average Time Consumption')
+    axes[1, 2].set_xlabel('Filter Type')
+    axes[1, 2].set_ylabel('Average Time (seconds)')
+    axes[1, 2].grid(True, alpha=0.3)
+    
+    # Add value labels on bars
+    for bar, avg_time in zip(bars, avg_times):
+        height = bar.get_height()
+        axes[1, 2].text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'{avg_time:.4f}', ha='center', va='bottom')
     
     plt.tight_layout()
     
     if save_plots:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{plot_dir}/sensor_selection_comparison_{timestamp}.png"
+        filename = f"{plot_dir}/sensor_selection_comparison_mscale={m_scale}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight')
         print(f"Comparison plots saved to: {filename}")
     
-    plt.show()
+    # plt.show()
     return fig
 
 import random
@@ -572,9 +616,10 @@ def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6
     all_ukf_results = []
     all_qkf_num_results = []
     all_qkf_analytic_results = []
-    for i in range(n_trials):
+    for idx in range(n_trials):
         seed_i = random.randint(0, 1000000)
-        ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False, update_interval=update_interval, m_scale=m_scale)
+        print(f"Running trial [{idx+1}/{n_trials}]")
+        ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(H=H, num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False, update_interval=update_interval, m_scale=m_scale, trial_idx=idx)
         
         # append results
         all_ekf_results.append(ekf_result)
@@ -596,7 +641,7 @@ def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6
     
     avg_all_results = [avg_all_ekf_results, avg_all_ukf_results, avg_all_qkf_num_results, avg_all_qkf_analytic_results]
     if plot:
-        plot_comparison(avg_all_results, save_plots=True, update_interval=update_interval)
+        plot_comparison(avg_all_results, save_plots=True, update_interval=update_interval, m_scale=m_scale)
     
     
     return avg_all_results
@@ -607,11 +652,11 @@ def run_nonlinearity_test(nonlinearity_factors=[1e-2, 1, 1e2], n_trials=5, H=100
 
 if __name__ == "__main__":
     # Run single trial (original behavior)
-    # run_sensor_scheduling_sim(num_sensors=6, max_sensors=3)
+    # run_sensor_scheduling_sim(H=1000, update_interval=100, num_sensors=10, max_sensors=5)
     
     # Run comprehensive test with multiple trials
-    # run_comprehensive_test(n_trials=20, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
+    # run_comprehensive_test(n_trials=5, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
     
     # Run nonlinearity test
-    nonlinearity_factors = [1e-2, 1, 1e1, 1e2, 1e3]
+    nonlinearity_factors = [1e-2, 1e-1, 1, 1e1, 1e2]
     run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=20, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
