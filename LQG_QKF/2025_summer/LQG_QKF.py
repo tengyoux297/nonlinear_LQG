@@ -232,6 +232,7 @@ class LQG:
         
         # states
         self.x_hat = np.zeros((self.n, 1)) # estimated state vector
+        self.x_hat_prev = self.x_hat.copy()
         self.z_hat = np.zeros((self.n + self.n**2, 1)) # estimated augmented state vector
         self.x_goal = np.zeros((self.n, 1)) # goal state vector
         
@@ -395,11 +396,12 @@ class LQG:
         
         # to be checked
         ####################################################
-        x_actual = self.F.get_x()  # shape (n, 1), current state vector
-        x = x_actual - goal_state # shape (n, 1)
+        # x_actual = self.F.get_x()  # shape (n, 1), current state vector
+        x_pred = A @ self.x_hat_prev + B @ self.F.get_u()  # shape (n, 1), predicted state vector
+        x = x_pred - goal_state # shape (n, 1)
         
         x_estimated = self.x_hat
-        x_tilde = x_estimated - x_actual # shape (n, 1)
+        x_tilde = x_estimated - x_pred # shape (n, 1)
         ####################################################
         
         # commutation matrix for I_p kron u
@@ -488,6 +490,7 @@ class LQG:
         Pz_1 = Pz_pred - K @ M @ K.T
         
         self.Pz_est = Pz_1
+        self.x_hat_prev = self.x_hat.copy()
         self.x_hat = self.Z_est[:self.n, :]
         return K
     
@@ -511,6 +514,7 @@ class LQG:
         # state update
         Y_meas = self.sensor.measure(self.F.get_x())
         innov = Y_meas - Y_pred
+        self.x_hat_prev = self.x_hat.copy()
         self.x_hat = X_pred + K @ innov
         self.P_est = P_pred - K @ M @ K.T
         return K
@@ -536,6 +540,7 @@ class LQG:
         
         # posterior estimate
         x_hat_post = x_hat_pri + kalman_gain @ innov
+        self.x_hat_prev = self.x_hat.copy()
         self.x_hat = (x_hat_post)
         
         # P_k - Propagation of the estimation error covariance matrix
@@ -618,6 +623,7 @@ class LQG:
         delta_y = y - y_predicted
         
         # Update the state estimate
+        self.x_hat_prev = self.x_hat.copy()
         self.x_hat = x_predicted + K @ delta_y
         
         # Update the covariance estimate
@@ -1244,8 +1250,8 @@ def plot_nonlinearity_analysis(results):
 
 
 if __name__ == "__main__":
-    test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    nonlinearity_test(H=1000, trials=100)
+    test(H=1000, trials=1, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    # nonlinearity_test(H=1000, trials=100)
         
 
 

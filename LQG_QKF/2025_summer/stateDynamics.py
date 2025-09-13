@@ -285,8 +285,8 @@ class sensor(object):
     '''
     Measurement function
     '''
-    term1 = self.C @ x
-    term2 = np.zeros((self.m, 1))
+    term1 = self.C @ x # shape (m,1)
+    term2 = np.zeros((self.m, 1)) 
     for i in range(self.m):
         e = np.zeros((self.m, 1))
         e[i] = 1
@@ -295,6 +295,7 @@ class sensor(object):
     D = np.linalg.cholesky(self.V)
     rng_noise = np.random.default_rng()  # fresh, unseeded generator
     term3 = D @ rng_noise.standard_normal((self.m, 1))
+    # print(f'term1: {term1.shape}, term2: {term2.shape}, term3: {term3.shape}')
     return term1 + term2 + term3
 
   

@@ -2,6 +2,9 @@ import os
 import matplotlib.pyplot as plt
 import pickle as pkl
 from datetime import datetime
+import random
+import itertools
+import time
 
 # Import specific modules instead of wildcard imports
 import sys
@@ -12,9 +15,10 @@ from stateDynamics import StateDynamics, sensor, Vec, invVec
 from typing import Literal
 from tqdm import tqdm
 import numpy as np
-
-random_seed = 42
-small_value = 1e-6
+import random
+import itertools
+import time
+import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 pkl_dir = 'pkl/'
@@ -23,6 +27,8 @@ perf_dir = 'perf/'
 os.makedirs(perf_dir, exist_ok=True)
 
 # build sensor selection simulator
+random_seed = 42
+small_value = 1e-6
 class SensorSelectionSimulator(LQG):
     def __init__(self, n1, n2, p, W, A_E, A_S, B_S, C, M, V, Q, R, H = 50, m_scale=1e2,
                  filter_type: Literal['qkf', 'ekf', 'kf', 'ukf'] = 'qkf',
@@ -228,7 +234,6 @@ class SensorSelectionSimulator(LQG):
         print(f"Starting sensor selection simulation with {self.filter_type} filter and {self.lqr_type} LQR...")
         
         for step in tqdm(range(1, self.H + 1, 1), desc=f"Running simulation with filter:[{self.filter_type}], controller:[{self.lqr_type}], m_scale:[{self.m_scale}]"):
-            import time
             step_start_time = time.time()
             
             # Update state estimation
@@ -443,13 +448,19 @@ def run_sensor_scheduling_sim(H=1000, update_interval=10, noise_scale=1e-1, m_sc
     for name, simulator in simulators.items():
         print(f"Saving {name} results...")
         simulator.save_results(trial_idx=trial_idx)
-            
-    all_results = [err_list_ekf, var_list_ekf, cost_list_ekf, time_list_ekf],  [err_list_ukf, var_list_ukf, cost_list_ukf, time_list_ukf], [err_list_aug_num, var_list_aug_num, cost_list_aug_num, time_list_aug_num], [err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic, time_list_aug_analytic]
-    # Create comparison plots only
+    
+    # Return performance histories for consistency with pickle loading
+    ekf_perf_history = simulators['ekf'].performance_history
+    ukf_perf_history = simulators['ukf'].performance_history  
+    qkf_num_perf_history = simulators['qkf_aug_num'].performance_history
+    qkf_analytic_perf_history = simulators['qkf_aug_analytic'].performance_history
+    
+    # Create comparison plots only if requested
     if plot:
+        all_results = [(err_list_ekf, var_list_ekf, cost_list_ekf, time_list_ekf), (err_list_ukf, var_list_ukf, cost_list_ukf, time_list_ukf), (err_list_aug_num, var_list_aug_num, cost_list_aug_num, time_list_aug_num), (err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic, time_list_aug_analytic)]
         plot_comparison(all_results, save_plots=True, update_interval=update_interval)
     
-    return all_results
+    return ekf_perf_history, ukf_perf_history, qkf_num_perf_history, qkf_analytic_perf_history
 
 system_names = ['ekf', 'ukf', 'qkf_aug_num', 'qkf_aug_analytic']
 sensor_update_interval = 10
@@ -463,16 +474,40 @@ def get_cost_to_go(cost_list):
 
 def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_interval=10, m_scale=1e0):
     """
-    Create simple comparison plots across different filter types.
+    Create publication-ready comparison plots across different filter types.
     """
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
     
-    fig, axes = plt.subplots(2, 3, figsize=(18, 8))
-    fig.suptitle('Sensor Selection Performance Comparison', fontsize=14)
+    # Set publication-ready style
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.rcParams.update({
+        'font.size': 12,
+        'font.family': 'serif',
+        'font.serif': ['Times New Roman'],
+        'axes.linewidth': 2.5,
+        'axes.spines.top': True,
+        'axes.spines.right': True,
+        'axes.spines.bottom': True,
+        'axes.spines.left': True,
+        'axes.edgecolor': 'black',
+        'grid.alpha': 0.3,
+        'legend.frameon': True,
+        'legend.fancybox': True,
+        'legend.shadow': True,
+        'legend.fontsize': 10,
+        'figure.dpi': 300
+    })
     
-    colors = ['blue', 'red', 'green', 'orange']
+    fig, axes = plt.subplots(2, 3, figsize=(20, 12))
+    fig.suptitle('Sensor Selection Performance Comparison\n($m_{scale}$ = ' + f'{m_scale}' + ')', 
+                 fontsize=18, fontweight='bold', y=0.98)
+    
+    # Professional color palette and styles
+    colors = ['#2E86C1', '#28B463', '#F39C12', '#E74C3C']  # Blue, Green, Orange, Red
     linestyles = ['-', '--', '-.', ':']
+    markers = ['o', 's', '^', 'D']
+    alphas = [0.9, 0.8, 0.8, 0.8]
     
     # 1. Cost-to-go comparison (top left)
     for i, result in enumerate(all_results):
@@ -486,14 +521,15 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         axes[0, 0].plot(time_steps, cost_to_go, 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=name, linewidth=2)
+                    label=name, linewidth=2.5, alpha=alphas[i])
     
-    axes[0, 0].set_title('Cost-to-Go Comparison')
-    axes[0, 0].set_xlabel('Time Step')
-    axes[0, 0].set_ylabel('Cost-to-Go (log scale)')
+    axes[0, 0].set_title('Cost-to-Go Comparison', fontsize=14, fontweight='bold', pad=15)
+    axes[0, 0].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
+    axes[0, 0].set_ylabel('Cost-to-Go (log scale)', fontsize=12, fontweight='semibold')
     axes[0, 0].set_yscale('log')
-    axes[0, 0].legend()
-    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].legend(loc='upper right', framealpha=0.9)
+    axes[0, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    axes[0, 0].tick_params(axis='both', which='major', labelsize=10)
     
     # 2. Staged cost-to-go comparison (top right)
     for i, result in enumerate(all_results):
@@ -532,14 +568,16 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         axes[0, 1].plot(phase_indices, staged_cost_to_go, 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=name, linewidth=2, marker='o', markersize=1)
+                    label=name, linewidth=2.5, marker=markers[i], 
+                    markersize=4, alpha=alphas[i], markevery=5)
     
-    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)')
-    axes[0, 1].set_xlabel('Phase Index')
-    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)')
+    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)', fontsize=14, fontweight='bold', pad=15)
+    axes[0, 1].set_xlabel('Phase Index', fontsize=12, fontweight='semibold')
+    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)', fontsize=12, fontweight='semibold')
     axes[0, 1].set_yscale('log')
-    axes[0, 1].legend()
-    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].legend(loc='upper right', framealpha=0.9)
+    axes[0, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    axes[0, 1].tick_params(axis='both', which='major', labelsize=10)
     
     # 3. Estimation error comparison (top right)
     for i, result in enumerate(all_results):
@@ -547,13 +585,15 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         axes[0, 2].plot(time_steps, result[0], 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=system_names[i], linewidth=2)
+                    label=system_names[i], linewidth=2.5, alpha=alphas[i])
     
-    axes[0, 2].set_title('Estimation Error Comparison')
-    axes[0, 2].set_xlabel('Time Step')
-    axes[0, 2].set_ylabel('||x_true - x_est||')
-    axes[0, 2].legend()
-    axes[0, 2].grid(True, alpha=0.3)
+    axes[0, 2].set_title('Estimation Error Comparison', fontsize=14, fontweight='bold', pad=15)
+    axes[0, 2].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
+    axes[0, 2].set_ylabel('$||x_{true} - x_{est}||$', fontsize=12, fontweight='semibold')
+    axes[0, 2].set_yscale('log')
+    axes[0, 2].legend(loc='upper right', framealpha=0.9)
+    axes[0, 2].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    axes[0, 2].tick_params(axis='both', which='major', labelsize=10)
     
     # 4. Estimation variance comparison (bottom left)
     for i, result in enumerate(all_results):
@@ -561,87 +601,175 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         axes[1, 0].plot(time_steps, result[1], 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=system_names[i], linewidth=2)
+                    label=system_names[i], linewidth=2.5, alpha=alphas[i])
     
-    axes[1, 0].set_title('Estimation Variance Comparison')
-    axes[1, 0].set_xlabel('Time Step')
-    axes[1, 0].set_ylabel('tr(P)')
-    axes[1, 0].legend()
-    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].set_title('Estimation Variance Comparison', fontsize=14, fontweight='bold', pad=15)
+    axes[1, 0].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
+    axes[1, 0].set_ylabel('$\\mathrm{Tr}(P_k)$', fontsize=12, fontweight='semibold')
+    axes[1, 0].legend(loc='upper right', framealpha=0.9)
+    axes[1, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    axes[1, 0].tick_params(axis='both', which='major', labelsize=10)
     
     # 5. Time consumption comparison (bottom center)
     for i, result in enumerate(all_results):
-        time_steps = np.arange(1, len(result[3]) + 1)
-        axes[1, 1].plot(time_steps, result[3], 
+        time_data = result[3]  # Time data is now consistently at index 3
+        time_steps = np.arange(1, len(time_data) + 1)
+        axes[1, 1].plot(time_steps, time_data, 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=system_names[i], linewidth=2)
+                    label=system_names[i], linewidth=2.5, alpha=alphas[i])
     
-    axes[1, 1].set_title('Time Consumption Comparison')
-    axes[1, 1].set_xlabel('Time Step')
-    axes[1, 1].set_ylabel('Time (seconds)')
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, alpha=0.3)
+    axes[1, 1].set_title('Time Consumption Comparison', fontsize=14, fontweight='bold', pad=15)
+    axes[1, 1].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
+    axes[1, 1].set_ylabel('Time (seconds)', fontsize=12, fontweight='semibold')
+    axes[1, 1].legend(loc='upper right', framealpha=0.9)
+    axes[1, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    axes[1, 1].tick_params(axis='both', which='major', labelsize=10)
     
     # 6. Average time consumption comparison (bottom right)
     avg_times = []
     for i, result in enumerate(all_results):
-        avg_time = np.mean(result[3])
+        time_data = result[3]  # Time data is now consistently at index 3
+        avg_time = np.mean(time_data)
         avg_times.append(avg_time)
     
-    bars = axes[1, 2].bar(system_names, avg_times, color=colors[:len(system_names)])
-    axes[1, 2].set_title('Average Time Consumption')
-    axes[1, 2].set_xlabel('Filter Type')
-    axes[1, 2].set_ylabel('Average Time (seconds)')
-    axes[1, 2].grid(True, alpha=0.3)
+    bars = axes[1, 2].bar(system_names, avg_times, 
+                         color=colors[:len(system_names)], 
+                         edgecolor='black', linewidth=1.2, alpha=0.8)
+    axes[1, 2].set_title('Average Time Consumption', fontsize=14, fontweight='bold', pad=15)
+    axes[1, 2].set_xlabel('Filter Type', fontsize=12, fontweight='semibold')
+    axes[1, 2].set_ylabel('Average Time (seconds)', fontsize=12, fontweight='semibold')
+    axes[1, 2].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
+    axes[1, 2].tick_params(axis='both', which='major', labelsize=10)
+    axes[1, 2].tick_params(axis='x', rotation=45)
     
-    # Add value labels on bars
+    # Add value labels on bars with improved formatting
     for bar, avg_time in zip(bars, avg_times):
         height = bar.get_height()
-        axes[1, 2].text(bar.get_x() + bar.get_width()/2., height + height*0.01,
-                    f'{avg_time:.4f}', ha='center', va='bottom')
+        axes[1, 2].text(bar.get_x() + bar.get_width()/2., height + height*0.02,
+                    f'{avg_time:.6f}', ha='center', va='bottom', 
+                    fontsize=10, fontweight='semibold')
     
-    plt.tight_layout()
+    # Enhanced prominent black borders for all subplots
+    for i in range(2):
+        for j in range(3):
+            for spine in axes[i, j].spines.values():
+                spine.set_edgecolor('black')
+                spine.set_linewidth(2.5)
+                spine.set_visible(True)
+    
+    # Enhance overall figure appearance
+    plt.tight_layout(pad=3.0)
+    fig.patch.set_facecolor('white')
     
     if save_plots:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{plot_dir}/sensor_selection_comparison_mscale={m_scale}.png"
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
-        print(f"Comparison plots saved to: {filename}")
+        plt.savefig(filename, dpi=300, bbox_inches='tight', 
+                   facecolor='white', edgecolor='none')
+        print(f"Publication-ready comparison plots saved to: {filename}")
     
     # plt.show()
     return fig
 
 import random
 def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6, max_sensors=3, plot=True, m_scale=1e0):
-    all_ekf_results = []
-    all_ukf_results = []
-    all_qkf_num_results = []
-    all_qkf_analytic_results = []
-    for idx in range(n_trials):
-        seed_i = random.randint(0, 1000000)
-        print(f"Running trial [{idx+1}/{n_trials}]")
-        ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(H=H, num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False, update_interval=update_interval, m_scale=m_scale, trial_idx=idx)
+    if not os.path.exists(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale}_trials={n_trials}.pkl"):
+        all_ekf_results = []
+        all_ukf_results = []
+        all_qkf_num_results = []
+        all_qkf_analytic_results = []
         
-        # append results
-        all_ekf_results.append(ekf_result)
-        all_ukf_results.append(ukf_result)
-        all_qkf_num_results.append(qkf_num_result)
-        all_qkf_analytic_results.append(qkf_analytic_result)
+        for idx in range(n_trials):
+            if not os.path.exists(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale}-trial_{idx}.pkl"):
+                # print(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale}-trial_{idx}.pkl")
+
+                seed_i = random.randint(0, 1000000)
+                print(f"Running trial [{idx+1}/{n_trials}]")
+                ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(H=H, num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False, update_interval=update_interval, m_scale=m_scale, trial_idx=idx)
+            else:
+                ekf_result = pkl.load(open(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
+                ukf_result = pkl.load(open(pkl_dir + f"sensor_selection_results_ukf_orig_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
+                qkf_num_result = pkl.load(open(pkl_dir + f"sensor_selection_results_qkf_aug_numeric_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
+                qkf_analytic_result = pkl.load(open(pkl_dir + f"sensor_selection_results_qkf_aug_analytic_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
+
+            # append results
+            all_ekf_results.append(ekf_result)
+            all_ukf_results.append(ukf_result)
+            all_qkf_num_results.append(qkf_num_result)
+            all_qkf_analytic_results.append(qkf_analytic_result)
+        
+        # Extract specific metrics for averaging
+        # Get cost data for averaging
+        ekf_costs = [result['cost'] for result in all_ekf_results]
+        ukf_costs = [result['cost'] for result in all_ukf_results]
+        qkf_num_costs = [result['cost'] for result in all_qkf_num_results]
+        qkf_analytic_costs = [result['cost'] for result in all_qkf_analytic_results]
+        
+        # Get estimation error data for averaging
+        ekf_errors = [result['estimation_error'] for result in all_ekf_results]
+        ukf_errors = [result['estimation_error'] for result in all_ukf_results]
+        qkf_num_errors = [result['estimation_error'] for result in all_qkf_num_results]
+        qkf_analytic_errors = [result['estimation_error'] for result in all_qkf_analytic_results]
+        
+        # Get covariance traces for averaging
+        ekf_traces = [result['covariance_traces'] for result in all_ekf_results]
+        ukf_traces = [result['covariance_traces'] for result in all_ukf_results]
+        qkf_num_traces = [result['covariance_traces'] for result in all_qkf_num_results]
+        qkf_analytic_traces = [result['covariance_traces'] for result in all_qkf_analytic_results]
+        
+        # get time consumption for averaging
+        ekf_times = [result['time_consumption'] for result in all_ekf_results]
+        ukf_times = [result['time_consumption'] for result in all_ukf_results]
+        qkf_num_times = [result['time_consumption'] for result in all_qkf_num_results]
+        qkf_analytic_times = [result['time_consumption'] for result in all_qkf_analytic_results]
+        
+        # Average the metrics
+        avg_ekf_cost = np.mean(ekf_costs, axis=0)
+        avg_ukf_cost = np.mean(ukf_costs, axis=0)
+        avg_qkf_num_cost = np.mean(qkf_num_costs, axis=0)
+        avg_qkf_analytic_cost = np.mean(qkf_analytic_costs, axis=0)
+        
+        avg_ekf_error = np.mean(ekf_errors, axis=0)
+        avg_ukf_error = np.mean(ukf_errors, axis=0)
+        avg_qkf_num_error = np.mean(qkf_num_errors, axis=0)
+        avg_qkf_analytic_error = np.mean(qkf_analytic_errors, axis=0)
+        
+        avg_ekf_trace = np.mean(ekf_traces, axis=0)
+        avg_ukf_trace = np.mean(ukf_traces, axis=0)
+        avg_qkf_num_trace = np.mean(qkf_num_traces, axis=0)
+        avg_qkf_analytic_trace = np.mean(qkf_analytic_traces, axis=0)
+        
+        avg_ekf_time = np.mean(ekf_times, axis=0)
+        avg_ukf_time = np.mean(ukf_times, axis=0)
+        avg_qkf_num_time = np.mean(qkf_num_times, axis=0)
+        avg_qkf_analytic_time = np.mean(qkf_analytic_times, axis=0)
+        
+        # Calculate cost-to-go for each averaged cost
+        def get_cost_to_go_from_cost(cost_list):
+            cost_to_go = []
+            for j in range(len(cost_list)):
+                cost_to_go.append(np.sum(cost_list[j:]))
+            return cost_to_go
+        
+        avg_ekf_cost_to_go = get_cost_to_go_from_cost(avg_ekf_cost)
+        avg_ukf_cost_to_go = get_cost_to_go_from_cost(avg_ukf_cost)
+        avg_qkf_num_cost_to_go = get_cost_to_go_from_cost(avg_qkf_num_cost)
+        avg_qkf_analytic_cost_to_go = get_cost_to_go_from_cost(avg_qkf_analytic_cost)
+        
+        # Create tuples in the expected format: (error, trace, cost_to_go, time)
+        avg_all_ekf_results = (avg_ekf_error, avg_ekf_trace, avg_ekf_cost_to_go, avg_ekf_time)
+        avg_all_ukf_results = (avg_ukf_error, avg_ukf_trace, avg_ukf_cost_to_go, avg_ukf_time)
+        avg_all_qkf_num_results = (avg_qkf_num_error, avg_qkf_num_trace, avg_qkf_num_cost_to_go, avg_qkf_num_time)
+        avg_all_qkf_analytic_results = (avg_qkf_analytic_error, avg_qkf_analytic_trace, avg_qkf_analytic_cost_to_go, avg_qkf_analytic_time)
+
+
+        avg_all_results = [avg_all_ekf_results, avg_all_ukf_results, avg_all_qkf_num_results, avg_all_qkf_analytic_results]
+        pkl.dump(avg_all_results, open(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale}_trials={n_trials}.pkl", 'wb'))
+    else:
+        print(f"Loading existing comprehensive results for m_scale={m_scale}, trials={n_trials}...")
+        avg_all_results = pkl.load(open(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale}_trials={n_trials}.pkl", 'rb'))
     
-    # average on all trials
-    all_ekf_results = np.array(all_ekf_results)
-    all_ukf_results = np.array(all_ukf_results)
-    all_qkf_num_results = np.array(all_qkf_num_results)
-    all_qkf_analytic_results = np.array(all_qkf_analytic_results)
-    
-    avg_all_ekf_results = np.mean(all_ekf_results, axis=0)
-    avg_all_ukf_results = np.mean(all_ukf_results, axis=0)
-    avg_all_qkf_num_results = np.mean(all_qkf_num_results, axis=0)
-    avg_all_qkf_analytic_results = np.mean(all_qkf_analytic_results, axis=0)
-    
-    
-    avg_all_results = [avg_all_ekf_results, avg_all_ukf_results, avg_all_qkf_num_results, avg_all_qkf_analytic_results]
     if plot:
         plot_comparison(avg_all_results, save_plots=True, update_interval=update_interval, m_scale=m_scale)
     
@@ -657,8 +785,8 @@ if __name__ == "__main__":
     # run_sensor_scheduling_sim(H=1000, update_interval=100, num_sensors=10, max_sensors=5)
     
     # Run comprehensive test with multiple trials
-    # run_comprehensive_test(n_trials=5, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
+    run_comprehensive_test(n_trials=5, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
     
-    # Run nonlinearity test
-    nonlinearity_factors = [1e-2, 1e-1, 1, 1e1, 1e2]
-    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
+    # # Run nonlinearity test
+    # nonlinearity_factors = [1e-2, 1e-1, 1, 1e1, 1e2]
+    # run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
