@@ -3,10 +3,12 @@ import matplotlib.pyplot as plt
 import pickle as pkl
 from datetime import datetime
 
-# from LQG_QKF.test_scenarios.LQG_QKF import *
-# from LQG_QKF.test_scenarios.stateDynamics import *
-from LQG_QKF import *
-from stateDynamics import *
+# Import specific modules instead of wildcard imports
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '2025_summer'))
+from LQG_QKF import LQG, generate_stable_system_parameters, validate_stable_parameters, generate_random_symmetric_matrix, generate_goal_state
+from stateDynamics import StateDynamics, sensor, Vec, invVec
 from typing import Literal
 from tqdm import tqdm
 import numpy as np
@@ -659,4 +661,4 @@ if __name__ == "__main__":
     
     # Run nonlinearity test
     nonlinearity_factors = [1e-2, 1e-1, 1, 1e1, 1e2]
-    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=20, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
+    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)

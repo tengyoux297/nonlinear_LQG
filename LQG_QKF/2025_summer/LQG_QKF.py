@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from typing import Literal
 from tqdm import tqdm
-from stateDynamics import *
+from stateDynamics import StateDynamics, sensor, Vec, invVec
 from scipy.linalg import sqrtm
 import pickle as pkl
 import time
@@ -1029,10 +1029,10 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         tolerance = np.mean(cost_list_ekf_avg[:100]) * 0.01  # 1% of initial cost as tolerance
         
-        # Debug: Check array shapes
-        print(f"cost_list_ekf_all shape: {cost_list_ekf_all.shape}")
-        print(f"cost_list_qkf_analytic_all shape: {cost_list_qkf_analytic_all.shape}")
-        print(f"trials: {trials}")
+        # # Debug: Check array shapes
+        # print(f"cost_list_ekf_all shape: {cost_list_ekf_all.shape}")
+        # print(f"cost_list_qkf_analytic_all shape: {cost_list_qkf_analytic_all.shape}")
+        # print(f"trials: {trials}")
         
         for cnt in range(trials):
             # For each trial, detect convergence using the improved method
@@ -1244,8 +1244,8 @@ def plot_nonlinearity_analysis(results):
 
 
 if __name__ == "__main__":
-    test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    nonlinearity_test(H=1000, trials=20)
+    test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    nonlinearity_test(H=1000, trials=100)
         
 
 
