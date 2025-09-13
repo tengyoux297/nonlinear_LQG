@@ -11,6 +11,7 @@ from scipy.linalg import sqrtm
 import pickle as pkl
 import time
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # Set publication-ready plotting style
 plt.style.use('default')
@@ -1250,8 +1251,8 @@ def plot_nonlinearity_analysis(results):
 
 
 if __name__ == "__main__":
-    test(H=1000, trials=1, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    nonlinearity_test(H=1000, trials=1)
+    test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    nonlinearity_test(H=1000, trials=100)
         
 
 
