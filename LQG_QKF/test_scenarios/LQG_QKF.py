@@ -1202,7 +1202,6 @@ def nonlinearity_test(H=1000, trials=20):
     
     return all_results
 
-
 def plot_nonlinearity_analysis(results):
     """
     Create publication-ready plots for nonlinearity analysis.
@@ -1213,9 +1212,9 @@ def plot_nonlinearity_analysis(results):
     # Create figure with publication-ready styling
     fig, ax = plt.subplots(figsize=(8, 6))
     # Subplot 2: Cost vs Nonlinearity (log scale for better visualization)
-    ax.set_title('Cost Performance vs. Nonlinearity', fontsize=20, fontweight='bold', pad=15)
+    ax.set_title('Average Cost Performance vs. Nonlinearity', fontsize=20, fontweight='bold', pad=15)
     ax.set_xlabel('Nonlinearity Scale (m_scale)', fontsize=20, fontweight='bold')
-    ax.set_ylabel('Average Final Cost', fontsize=20, fontweight='bold')
+    ax.set_ylabel('Average Cost (All Time Steps)', fontsize=20, fontweight='bold')
     
     
     # Plot with enhanced styling
@@ -1243,10 +1242,11 @@ def plot_nonlinearity_analysis(results):
     
     print(f"\n=== Nonlinearity Analysis Summary ===")
     print(f"Nonlinearity scales tested: {results['m_scales']}")
-    print(f"EKF final costs: {[f'{cost:.2e}' for cost in results['ekf_costs']]}")
-    print(f"UKF final costs: {[f'{cost:.2e}' for cost in results['ukf_costs']]}")
-    print(f"QKF(numeric) final costs: {[f'{cost:.2e}' for cost in results['qkf_numeric_costs']]}")
-    print(f"QKF(analytic) final costs: {[f'{cost:.2e}' for cost in results['qkf_analytic_costs']]}")
+    print(f"EKF average costs: {[f'{cost:.2e}' for cost in results['ekf_costs']]}")
+    print(f"UKF average costs: {[f'{cost:.2e}' for cost in results['ukf_costs']]}")
+    print(f"QKF(numeric) average costs: {[f'{cost:.2e}' for cost in results['qkf_numeric_costs']]}")
+    print(f"QKF(analytic) average costs: {[f'{cost:.2e}' for cost in results['qkf_analytic_costs']]}")
+
 
 
 if __name__ == "__main__":
