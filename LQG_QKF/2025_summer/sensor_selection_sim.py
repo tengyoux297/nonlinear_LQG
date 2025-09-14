@@ -472,6 +472,19 @@ def get_cost_to_go(cost_list):
         cost_to_go.append(np.sum(cost_list[j:]))
     return cost_to_go
 
+plot_labels = {
+    'ekf': 'LQG+EKF',
+    'ukf': 'LQG+UKF',
+    'qkf_aug_num': 'iLQG+QKF (Numeric)',
+    'qkf_aug_analytic': 'LQG+QKF (Analytic)'
+}
+
+axis_labels = {
+    'ekf': 'LQG+EKF',
+    'ukf': 'LQG+UKF',
+    'qkf_aug_num': 'iLQG+QKF\n(Numeric)',
+    'qkf_aug_analytic': 'LQG+QKF\n(Analytic)'
+}
 
 def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_interval=10, m_scale=1e0):
     """
@@ -500,9 +513,10 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         'figure.dpi': 300
     })
     
-    fig, axes = plt.subplots(2, 3, figsize=(20, 12))
-    fig.suptitle('Sensor Selection Performance Comparison\n($m_{scale}$ = ' + f'{m_scale}' + ')', 
-                 fontsize=18, fontweight='bold', y=0.98)
+    # Create 2x2 subplot layout
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Sensor Selection Performance Comparison (Nonlinearity Scale = ' + f'{m_scale}' + ')', 
+                 fontsize=24, fontweight='bold', y=0.98)
     
     # Professional color palette and styles
     colors = ['#2E86C1', '#28B463', '#F39C12', '#E74C3C']  # Blue, Green, Orange, Red
@@ -522,15 +536,15 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         axes[0, 0].plot(time_steps, cost_to_go, 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=name, linewidth=2.5, alpha=alphas[i])
+                    label=plot_labels[name], linewidth=2.5, alpha=alphas[i])
     
-    axes[0, 0].set_title('Cost-to-Go Comparison', fontsize=14, fontweight='bold', pad=15)
-    axes[0, 0].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
-    axes[0, 0].set_ylabel('Cost-to-Go (log scale)', fontsize=12, fontweight='semibold')
+    axes[0, 0].set_title('Cost-to-Go Comparison', fontsize=18, fontweight='bold', pad=10)
+    axes[0, 0].set_xlabel('Time Step', fontsize=16, fontweight='bold')
+    axes[0, 0].set_ylabel('Cost-to-Go (log scale)', fontsize=16, fontweight='bold')
     axes[0, 0].set_yscale('log')
-    axes[0, 0].legend(loc='upper right', framealpha=0.9)
+    axes[0, 0].legend(loc='lower left', framealpha=0.9, fontsize=12)
     axes[0, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[0, 0].tick_params(axis='both', which='major', labelsize=10)
+    axes[0, 0].tick_params(axis='both', which='major', labelsize=12)
     
     # 2. Staged cost-to-go comparison (top right)
     for i, result in enumerate(all_results):
@@ -569,106 +583,92 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
         axes[0, 1].plot(phase_indices, staged_cost_to_go, 
                     color=colors[i % len(colors)], 
                     linestyle=linestyles[i % len(linestyles)],
-                    label=name, linewidth=2.5, marker=markers[i], 
+                    label=plot_labels[name], linewidth=2.5, marker=markers[i], 
                     markersize=4, alpha=alphas[i], markevery=5)
     
-    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)', fontsize=14, fontweight='bold', pad=15)
-    axes[0, 1].set_xlabel('Phase Index', fontsize=12, fontweight='semibold')
-    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)', fontsize=12, fontweight='semibold')
+    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)', fontsize=18, fontweight='bold', pad=10)
+    axes[0, 1].set_xlabel('Phase Index', fontsize=16, fontweight='bold')
+    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)', fontsize=16, fontweight='bold')
     axes[0, 1].set_yscale('log')
-    axes[0, 1].legend(loc='upper right', framealpha=0.9)
+    axes[0, 1].legend(loc='lower left', framealpha=0.9, fontsize=12)
     axes[0, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[0, 1].tick_params(axis='both', which='major', labelsize=10)
+    axes[0, 1].tick_params(axis='both', which='major', labelsize=12)
     
-    # 3. Estimation error comparison (top right)
+    # 3. Average estimation error comparison (bottom left)
+    avg_errors = []
     for i, result in enumerate(all_results):
-        time_steps = np.arange(1, len(result[0]) + 1)
-        axes[0, 2].plot(time_steps, result[0], 
-                    color=colors[i % len(colors)], 
-                    linestyle=linestyles[i % len(linestyles)],
-                    label=system_names[i], linewidth=2.5, alpha=alphas[i])
+        avg_error = np.mean(result[0])  # Average estimation error
+        avg_errors.append(avg_error)
+    plot_system_names = [axis_labels[name] for name in system_names]
+    bars_error = axes[1, 0].bar(plot_system_names, avg_errors, 
+                               color=colors[:len(system_names)], 
+                               edgecolor='black', linewidth=1.2, alpha=0.8)
+    axes[1, 0].set_title('Average Estimation Error', fontsize=18, fontweight='bold', pad=10)
+    # axes[1, 0].set_xlabel('Filter Type', fontsize=16, fontweight='bold')
+    axes[1, 0].set_ylabel('Average $||x_{true} - x_{est}||$', fontsize=16, fontweight='bold')
     
-    axes[0, 2].set_title('Estimation Error Comparison', fontsize=14, fontweight='bold', pad=15)
-    axes[0, 2].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
-    axes[0, 2].set_ylabel('$||x_{true} - x_{est}||$', fontsize=12, fontweight='semibold')
-    axes[0, 2].set_yscale('log')
-    axes[0, 2].legend(loc='upper right', framealpha=0.9)
-    axes[0, 2].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[0, 2].tick_params(axis='both', which='major', labelsize=10)
+    # Set y-axis limit to prevent overlap with top border
+    max_error = max(avg_errors)
+    axes[1, 0].set_ylim(0, max_error * 1.15)
     
-    # 4. Estimation variance comparison (bottom left)
-    for i, result in enumerate(all_results):
-        time_steps = np.arange(1, len(result[1]) + 1)
-        axes[1, 0].plot(time_steps, result[1], 
-                    color=colors[i % len(colors)], 
-                    linestyle=linestyles[i % len(linestyles)],
-                    label=system_names[i], linewidth=2.5, alpha=alphas[i])
+    axes[1, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
+    axes[1, 0].tick_params(axis='both', which='major', labelsize=14)
+    axes[1, 0].tick_params(axis='x', rotation=0)
     
-    axes[1, 0].set_title('Estimation Variance Comparison', fontsize=14, fontweight='bold', pad=15)
-    axes[1, 0].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
-    axes[1, 0].set_ylabel('$\\mathrm{Tr}(P_k)$', fontsize=12, fontweight='semibold')
-    axes[1, 0].legend(loc='upper right', framealpha=0.9)
-    axes[1, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[1, 0].tick_params(axis='both', which='major', labelsize=10)
+    # Add value labels on bars
+    for bar, avg_error in zip(bars_error, avg_errors):
+        height = bar.get_height()
+        axes[1, 0].text(bar.get_x() + bar.get_width()/2., height + max_error*0.03,
+                f'{avg_error:.4f}', ha='center', va='bottom', 
+                fontsize=11, fontweight='bold')
     
-    # 5. Time consumption comparison (bottom center)
-    for i, result in enumerate(all_results):
-        time_data = result[3]  # Time data is now consistently at index 3
-        time_steps = np.arange(1, len(time_data) + 1)
-        axes[1, 1].plot(time_steps, time_data, 
-                    color=colors[i % len(colors)], 
-                    linestyle=linestyles[i % len(linestyles)],
-                    label=system_names[i], linewidth=2.5, alpha=alphas[i])
-    
-    axes[1, 1].set_title('Time Consumption Comparison', fontsize=14, fontweight='bold', pad=15)
-    axes[1, 1].set_xlabel('Time Step', fontsize=12, fontweight='semibold')
-    axes[1, 1].set_ylabel('Time (seconds)', fontsize=12, fontweight='semibold')
-    axes[1, 1].legend(loc='upper right', framealpha=0.9)
-    axes[1, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[1, 1].tick_params(axis='both', which='major', labelsize=10)
-    
-    # 6. Average time consumption comparison (bottom right)
+    # 4. Average time consumption comparison (bottom right)
     avg_times = []
     for i, result in enumerate(all_results):
         time_data = result[3]  # Time data is now consistently at index 3
         avg_time = np.mean(time_data)
         avg_times.append(avg_time)
-    
-    bars = axes[1, 2].bar(system_names, avg_times, 
+    axis_label_names = [axis_labels[name] for name in system_names]
+    bars = axes[1, 1].bar(axis_label_names, avg_times, 
                          color=colors[:len(system_names)], 
                          edgecolor='black', linewidth=1.2, alpha=0.8)
-    axes[1, 2].set_title('Average Time Consumption', fontsize=14, fontweight='bold', pad=15)
-    axes[1, 2].set_xlabel('Filter Type', fontsize=12, fontweight='semibold')
-    axes[1, 2].set_ylabel('Average Time (seconds)', fontsize=12, fontweight='semibold')
-    axes[1, 2].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
-    axes[1, 2].tick_params(axis='both', which='major', labelsize=10)
-    axes[1, 2].tick_params(axis='x', rotation=45)
+    axes[1, 1].set_title('Average Time Consumption', fontsize=18, fontweight='bold', pad=10)
+    # axes[1, 1].set_xlabel('Filter Type', fontsize=16, fontweight='bold')
+    axes[1, 1].set_ylabel('Average Time (seconds)', fontsize=16, fontweight='bold')
     
-    # Add value labels on bars with improved formatting
+    # Set y-axis limit to prevent overlap with top border
+    max_time = max(avg_times)
+    axes[1, 1].set_ylim(0, max_time * 1.15)
+    
+    axes[1, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
+    axes[1, 1].tick_params(axis='both', which='major', labelsize=14)
+    axes[1, 1].tick_params(axis='x', rotation=0)
+    
+    # Add value labels on bars
     for bar, avg_time in zip(bars, avg_times):
         height = bar.get_height()
-        axes[1, 2].text(bar.get_x() + bar.get_width()/2., height + height*0.02,
-                    f'{avg_time:.6f}', ha='center', va='bottom', 
-                    fontsize=10, fontweight='semibold')
+        axes[1, 1].text(bar.get_x() + bar.get_width()/2., height + max_time*0.03,
+                f'{avg_time:.6f}', ha='center', va='bottom', 
+                fontsize=11, fontweight='bold')
     
     # Enhanced prominent black borders for all subplots
     for i in range(2):
-        for j in range(3):
+        for j in range(2):
             for spine in axes[i, j].spines.values():
                 spine.set_edgecolor('black')
                 spine.set_linewidth(2.5)
                 spine.set_visible(True)
     
     # Enhance overall figure appearance
-    plt.tight_layout(pad=3.0)
+    plt.tight_layout(pad=1.5)
     fig.patch.set_facecolor('white')
     
     if save_plots:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{plot_dir}/sensor_selection_comparison_mscale={m_scale}.png"
+        filename = f"{plot_dir}/sensor_selection_comparison_mscale={m_scale:.0e}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight', 
                    facecolor='white', edgecolor='none')
-        print(f"Publication-ready comparison plots saved to: {filename}")
+        print(f"Plots saved to: {filename}")
     
     # plt.show()
     return fig
@@ -786,8 +786,8 @@ if __name__ == "__main__":
     # run_sensor_scheduling_sim(H=1000, update_interval=100, num_sensors=10, max_sensors=5)
     
     # Run comprehensive test with multiple trials
-    run_comprehensive_test(n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
+    run_comprehensive_test(n_trials=1, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
     
     # # Run nonlinearity test
-    nonlinearity_factors = [1e-2, 1e-1, 1, 1e1, 1e2]
-    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
+    nonlinearity_factors = [0, 1, 1e1, 1e2]
+    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=1, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
