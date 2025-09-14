@@ -951,7 +951,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         fig.suptitle('Estimation Performance Comparison', fontsize=24, y=0.98, fontweight='bold')
         
         # Error subplot
-        ax[0].set_title(f'Estimation Error, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
+        ax[0].set_title(f'Estimation Error, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
         ax[0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
         ax[0].set_ylabel('Mean Squared Error', fontsize=20, fontweight='bold')
         ax[0].plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
@@ -1001,7 +1001,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
         fig, ax = plt.subplots(figsize=(8, 6))
         bars = ax.bar(controllers, avg_times, color=colors, edgecolor='black')
-        ax.set_title(f'Average Computational Time per Step, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
+        ax.set_title(f'Average Computational Time per Step, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
         ax.set_ylabel('Average Time per Step (seconds)', fontsize=20, fontweight='bold')
         ax.set_xlabel('Controller', fontsize=20, fontweight='bold')
         ax.tick_params(axis='x', labelsize=12, rotation=15)
@@ -1018,7 +1018,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
         # Plot cost performance comparison with publication-ready styling
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.set_title(f'Cost Performance Comparison, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
+        ax.set_title(f'Cost Performance Comparison, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
         ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
         ax.set_ylabel('Cost-to-go (log scale)', fontsize=20, fontweight='bold')
         
@@ -1049,7 +1049,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
         # Plot timing performance comparison with publication-ready styling
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.set_title(f'Computational Time per Step, Factor m = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
+        ax.set_title(f'Computational Time per Step, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
         ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
         ax.set_ylabel('Time per Step (seconds)', fontsize=20, fontweight='bold')
         
@@ -1093,7 +1093,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
             conv_qkf_num, _ = detect_convergence(cost_list_qkf_num_all[cnt], tolerance=tolerance)
             conv_ukf, _ = detect_convergence(cost_list_ukf_all[cnt], tolerance=tolerance)
             conv_qkf_analytic, _ = detect_convergence(cost_list_qkf_analytic_all[cnt], tolerance=tolerance)
-            print(conv_qkf_analytic)
+            # print(conv_qkf_analytic)
             convergence_ekf.append(conv_ekf if conv_ekf is not None else H)
             convergence_qkf_num.append(conv_qkf_num if conv_qkf_num is not None else H)
             convergence_ukf.append(conv_ukf if conv_ukf is not None else H)
@@ -1101,7 +1101,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 1: Average Convergence statistics
         ax1 = axes[0]
-        ax1.set_title(f'Average Convergence Time, Factor m = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
+        ax1.set_title(f'Average Convergence Time, Nonlinearity Scale = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
         methods = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF\n(numeric)', 'LQG+QKF\n(analytic)']
         print(methods)
         avg_conv_times = [np.mean(convergence_ekf), np.mean(convergence_ukf), np.mean(convergence_qkf_num), np.mean(convergence_qkf_analytic)]
@@ -1124,7 +1124,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         ax2 = axes[1]
         # Subplot 2: Final convergence status
         ax2 = axes[1]
-        ax2.set_title(f'Convergence Rate, Factor m = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
+        ax2.set_title(f'Convergence Rate, Nonlinearity Scale = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
         conv_counts = [
             np.sum(np.array(convergence_ekf) < H),
             np.sum(np.array(convergence_ukf) < H),
@@ -1214,7 +1214,7 @@ def plot_nonlinearity_analysis(results):
     fig, ax = plt.subplots(figsize=(8, 6))
     # Subplot 2: Cost vs Nonlinearity (log scale for better visualization)
     ax.set_title('Average Cost Performance vs. Nonlinearity', fontsize=20, fontweight='bold', pad=15)
-    ax.set_xlabel('Nonlinearity Scale', fontsize=20, fontweight='bold')
+    ax.set_xlabel('Nonlinearity Scale (m)', fontsize=20, fontweight='bold')
     ax.set_ylabel('Average Cost', fontsize=20, fontweight='bold')
     
     
@@ -1250,8 +1250,8 @@ def plot_nonlinearity_analysis(results):
 
 
 if __name__ == "__main__":
-    test(H=1000, trials=5, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
-    # nonlinearity_test(H=1000, trials=1)
+    test(H=1000, trials=100, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.0, R_scale=1.0)
+    nonlinearity_test(H=1000, trials=100)
         
 
 

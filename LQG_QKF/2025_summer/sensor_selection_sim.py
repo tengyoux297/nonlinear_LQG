@@ -687,24 +687,24 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
 
 import random
 def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6, max_sensors=3, plot=True, m_scale=1e0):
-    if not os.path.exists(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale}_trials={n_trials}.pkl"):
+    if not os.path.exists(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale:.0e}_trials={n_trials}.pkl"):
         all_ekf_results = []
         all_ukf_results = []
         all_qkf_num_results = []
         all_qkf_analytic_results = []
         
         for idx in range(n_trials):
-            if not os.path.exists(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale}-trial_{idx}.pkl"):
+            if not os.path.exists(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale:.0e}-trial_{idx}.pkl"):
                 # print(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale}-trial_{idx}.pkl")
 
                 seed_i = random.randint(0, 1000000)
                 print(f"Running trial [{idx+1}/{n_trials}]")
                 ekf_result, ukf_result, qkf_num_result, qkf_analytic_result = run_sensor_scheduling_sim(H=H, num_sensors=num_sensors, max_sensors=max_sensors, rand_seed=seed_i, plot=False, update_interval=update_interval, m_scale=m_scale, trial_idx=idx)
             else:
-                ekf_result = pkl.load(open(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
-                ukf_result = pkl.load(open(pkl_dir + f"sensor_selection_results_ukf_orig_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
-                qkf_num_result = pkl.load(open(pkl_dir + f"sensor_selection_results_qkf_aug_numeric_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
-                qkf_analytic_result = pkl.load(open(pkl_dir + f"sensor_selection_results_qkf_aug_analytic_mscale={m_scale}-trial_{idx}.pkl", 'rb'))['performance_history']
+                ekf_result = pkl.load(open(pkl_dir + f"sensor_selection_results_ekf_orig_mscale={m_scale:.0e}-trial_{idx}.pkl", 'rb'))['performance_history']
+                ukf_result = pkl.load(open(pkl_dir + f"sensor_selection_results_ukf_orig_mscale={m_scale:.0e}-trial_{idx}.pkl", 'rb'))['performance_history']
+                qkf_num_result = pkl.load(open(pkl_dir + f"sensor_selection_results_qkf_aug_numeric_mscale={m_scale:.0e}-trial_{idx}.pkl", 'rb'))['performance_history']
+                qkf_analytic_result = pkl.load(open(pkl_dir + f"sensor_selection_results_qkf_aug_analytic_mscale={m_scale:.0e}-trial_{idx}.pkl", 'rb'))['performance_history']
 
             # append results
             all_ekf_results.append(ekf_result)
@@ -778,11 +778,11 @@ def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6
 
 
         avg_all_results = [avg_all_ekf_results, avg_all_ukf_results, avg_all_qkf_num_results, avg_all_qkf_analytic_results]
-        pkl.dump(avg_all_results, open(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale}_trials={n_trials}.pkl", 'wb'))
+        pkl.dump(avg_all_results, open(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale:.0e}_trials={n_trials}.pkl", 'wb'))
     else:
-        print(f"Loading existing comprehensive results for m_scale={m_scale}, trials={n_trials}...")
-        avg_all_results = pkl.load(open(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale}_trials={n_trials}.pkl", 'rb'))
-    
+        print(f"Loading existing comprehensive results for m_scale={m_scale:.0e}, trials={n_trials}...")
+        avg_all_results = pkl.load(open(pkl_dir + f"sensor_selection_comprehensive_results_mscale={m_scale:.0e}_trials={n_trials}.pkl", 'rb'))
+
     if plot:
         plot_comparison(avg_all_results, save_plots=True, update_interval=update_interval, m_scale=m_scale)
     
@@ -798,9 +798,9 @@ if __name__ == "__main__":
     # run_sensor_scheduling_sim(H=1000, update_interval=100, num_sensors=10, max_sensors=5)
     
     # Run comprehensive test with multiple trials
-    run_comprehensive_test(n_trials=1, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
+    run_comprehensive_test(n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e2)
     
     # # Run nonlinearity test
     # nonlinearity_factors = [0, 1, 1e1, 1e2]
     nonlinearity_factors = [1e2]
-    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=1, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
+    # run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
