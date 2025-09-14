@@ -309,53 +309,7 @@ class SensorSelectionSimulator(LQG):
             cost_to_go = np.sum(self.performance_history['cost'][i:])
             cost_to_go_list.append(cost_to_go)
         return cost_to_go_list
-    
-    
-    def plot_performance(self, save_plots=True, plot_dir=perf_dir):
-        """
-        Create simple performance plots similar to LQG_QKF.py style.
-        """
-        if not os.path.exists(plot_dir):
-            os.makedirs(plot_dir)
-        
-        # Create simple 1x3 subplot layout for essential metrics only
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-        fig.suptitle(f'Sensor Selection Performance - {self.filter_type.upper()}', fontsize=14)
-        
-        # Time vector
-        time_steps = np.arange(1, len(self.performance_history['cost']) + 1)
-        
-        # 1. Cost over time
-        axes[0].plot(time_steps, self.performance_history['cost'], 'b-', linewidth=2)
-        axes[0].set_title('Control Cost')
-        axes[0].set_xlabel('Time Step')
-        axes[0].set_ylabel('Cost')
-        axes[0].grid(True, alpha=0.3)
-        
-        # 2. Estimation error over time
-        axes[1].plot(time_steps, self.performance_history['estimation_error'], 'r-', linewidth=2)
-        axes[1].set_title('Estimation Error')
-        axes[1].set_xlabel('Time Step')
-        axes[1].set_ylabel('||x_true - x_est||')
-        axes[1].grid(True, alpha=0.3)
-        
-        # 3. Covariance trace over time
-        axes[2].plot(time_steps, self.performance_history['covariance_traces'], 'g-', linewidth=2)
-        axes[2].set_title('Covariance Trace')
-        axes[2].set_xlabel('Time Step')
-        axes[2].set_ylabel('tr(P)')
-        axes[2].grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        if save_plots:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{plot_dir}/sensor_selection_perf_{self.filter_type}_{self.lqr_type}_{timestamp}.png"
-            plt.savefig(filename, dpi=300, bbox_inches='tight')
-            print(f"Performance plots saved to: {filename}")
-        
-        plt.show()
-        return fig
+
     
     def save_results(self, trial_idx=None, save_dir=pkl_dir):
         """
@@ -460,7 +414,8 @@ def run_sensor_scheduling_sim(H=1000, update_interval=10, noise_scale=1e-1, m_sc
     if plot:
         all_results = [(err_list_ekf, var_list_ekf, cost_list_ekf, time_list_ekf), (err_list_ukf, var_list_ukf, cost_list_ukf, time_list_ukf), (err_list_aug_num, var_list_aug_num, cost_list_aug_num, time_list_aug_num), (err_list_aug_analytic, var_list_aug_analytic, cost_list_aug_analytic, time_list_aug_analytic)]
         plot_comparison(all_results, save_plots=True, update_interval=update_interval)
-    
+        plot_comparison_brief(all_results, save_plots=True, update_interval=update_interval, m_scale=m_scale)
+        
     return ekf_perf_history, ukf_perf_history, qkf_num_perf_history, qkf_analytic_perf_history
 
 system_names = ['ekf', 'ukf', 'qkf_aug_num', 'qkf_aug_analytic']
@@ -514,9 +469,9 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     })
     
     # Create 2x2 subplot layout
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Sensor Selection Performance Comparison (Nonlinearity Scale = ' + f'{m_scale}' + ')', 
-                 fontsize=24, fontweight='bold', y=0.98)
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+    fig.suptitle('Sensor Scheduling Performance Comparison (Nonlinearity Scale α = ' + f'{(m_scale):.2e}' + ')', 
+                 fontsize=28, fontweight='bold', y=0.98)
     
     # Professional color palette and styles
     colors = ['#2E86C1', '#28B463', '#F39C12', '#E74C3C']  # Blue, Green, Orange, Red
@@ -546,7 +501,7 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     axes[0, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     axes[0, 0].tick_params(axis='both', which='major', labelsize=16)
     # Add subplot index
-    axes[0, 0].text(-0.06, 1.05, 'A', transform=axes[0, 0].transAxes, fontsize=28, fontweight='bold', 
+    axes[0, 0].text(-0.12, 1.02, 'A', transform=axes[0, 0].transAxes, fontsize=28, fontweight='bold', 
                     va='bottom', ha='left')
     
     # 2. Staged cost-to-go comparison (top right)
@@ -597,7 +552,7 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     axes[0, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     axes[0, 1].tick_params(axis='both', which='major', labelsize=16)
     # Add subplot index
-    axes[0, 1].text(-0.06, 1.05, 'B', transform=axes[0, 1].transAxes, fontsize=28, fontweight='bold', 
+    axes[0, 1].text(-0.12, 1.05, 'B', transform=axes[0, 1].transAxes, fontsize=28, fontweight='bold', 
                     va='bottom', ha='left')
     
     # 3. Average estimation error comparison (bottom left)
@@ -621,7 +576,7 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     axes[1, 0].tick_params(axis='both', which='major', labelsize=16)
     axes[1, 0].tick_params(axis='x', rotation=0)
     # Add subplot index
-    axes[1, 0].text(-0.06, 1.05, 'C', transform=axes[1, 0].transAxes, fontsize=28, fontweight='bold', 
+    axes[1, 0].text(-0.12, 1.05, 'C', transform=axes[1, 0].transAxes, fontsize=28, fontweight='bold', 
                     va='bottom', ha='left')
     
     # Add value labels on bars
@@ -653,7 +608,7 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     axes[1, 1].tick_params(axis='both', which='major', labelsize=16)
     axes[1, 1].tick_params(axis='x', rotation=0)
     # Add subplot index
-    axes[1, 1].text(-0.06, 1.05, 'D', transform=axes[1, 1].transAxes, fontsize=28, fontweight='bold', 
+    axes[1, 1].text(-0.12, 1.05, 'D', transform=axes[1, 1].transAxes, fontsize=28, fontweight='bold', 
                     va='bottom', ha='left')
     
     # Add value labels on bars
@@ -676,7 +631,6 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     fig.patch.set_facecolor('white')
     
     if save_plots:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{plot_dir}/sensor_selection_comparison_mscale={m_scale:.0e}.png"
         plt.savefig(filename, dpi=300, bbox_inches='tight', 
                    facecolor='white', edgecolor='none')
@@ -684,6 +638,149 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     
     # plt.show()
     return fig
+
+
+def plot_comparison_brief(all_results, save_plots=True, plot_dir=perf_dir, update_interval=10, m_scale=1e0):
+    """
+    Create publication-ready comparison plots across different filter types.
+    """
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    
+    # Set publication-ready style
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.rcParams.update({
+        'font.size': 12,
+        'font.family': 'serif',
+        'font.serif': ['Times New Roman'],
+        'axes.linewidth': 2.5,
+        'axes.spines.top': True,
+        'axes.spines.right': True,
+        'axes.spines.bottom': True,
+        'axes.spines.left': True,
+        'axes.edgecolor': 'black',
+        'grid.alpha': 0.3,
+        'legend.frameon': True,
+        'legend.fancybox': True,
+        'legend.shadow': True,
+        'legend.fontsize': 10,
+        'figure.dpi': 300
+    })
+
+    # Create 1x2 subplot layout
+    fig, axes = plt.subplots(1, 2, figsize=(12, 7))
+    fig.suptitle('Sensor Scheduling Performance Comparison\n(Nonlinearity Scale α = ' + f'{(m_scale):.2e}' + ')', 
+                 fontsize=28, fontweight='bold', y=0.98)
+    
+    # Professional color palette and styles
+    colors = ['#2E86C1', '#28B463', '#F39C12', '#E74C3C']  # Blue, Green, Orange, Red
+    linestyles = ['-', '--', '-.', ':']
+    markers = ['o', 's', '^', 'D']
+    alphas = [0.9, 0.8, 0.8, 0.8]
+    
+   
+    # 1. Staged cost-to-go comparison (left plot)
+    for i, result in enumerate(all_results):
+        cost_list = result[2]
+        time_steps = np.arange(1, len(result[2]) + 1)
+        
+        # Calculate staged cost-to-go for each goal state phase
+        staged_costs = []
+        
+        # Group costs by sensor selection phases
+        phase_costs = []
+        staged_costs = []
+        for j, cost in enumerate(cost_list):
+            phase_costs.append(cost)
+            
+            # Check if we're at a sensor selection update point
+            if (j + 1) % update_interval == 0:
+                # Calculate cost accumulated during this phase only
+                staged_costs.append(phase_costs)
+                phase_costs = []  # Reset for next phase
+        
+        # Handle remaining costs if simulation doesn't end at sensor update
+        if phase_costs:
+            phase_cost = np.sum(phase_costs)
+            staged_costs.append(phase_cost)
+        
+        # Plot staged costs - use phase indices (0, 1, 2, ...)
+        staged_cost_to_go = []
+        # print(len(staged_costs))
+        for staged_costs in staged_costs:
+            staged_cost_to_go.append(get_cost_to_go(staged_costs))
+        staged_cost_to_go = np.concatenate(staged_cost_to_go)
+        name = system_names[i]
+        phase_indices = np.arange(len(staged_cost_to_go))
+        
+        axes[0].plot(phase_indices, staged_cost_to_go, 
+                    color=colors[i % len(colors)], 
+                    linestyle=linestyles[i % len(linestyles)],
+                    label=plot_labels[name], linewidth=2.5, marker=markers[i], 
+                    markersize=4, alpha=alphas[i], markevery=5)
+    
+    axes[0].set_title('Staged Cost-to-Go (Goal State Phases)', fontsize=22, fontweight='bold', pad=10)
+    axes[0].set_xlabel('Phase Index', fontsize=20, fontweight='bold')
+    axes[0].set_ylabel('Phase Cost-to-Go (log scale)', fontsize=20, fontweight='bold')
+    axes[0].set_yscale('log')
+    axes[0].legend(loc='lower left', framealpha=0.9, fontsize=14)
+    axes[0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    axes[0].tick_params(axis='both', which='major', labelsize=16)
+    # Add subplot index
+    axes[0].text(-0.12, 1.05, 'A', transform=axes[0].transAxes, fontsize=28, fontweight='bold', 
+                    va='bottom', ha='left')
+    
+    # 3. Average estimation error comparison (bottom left)
+    avg_errors = []
+    for i, result in enumerate(all_results):
+        avg_error = np.mean(result[0])  # Average estimation error
+        avg_errors.append(avg_error)
+    plot_system_names = [axis_labels[name] for name in system_names]
+    bars_error = axes[1].bar(plot_system_names, avg_errors, 
+                               color=colors[:len(system_names)], 
+                               edgecolor='black', linewidth=1.2, alpha=0.8)
+    axes[1].set_title('Average Estimation Error', fontsize=22, fontweight='bold', pad=10)
+    # axes[1].set_xlabel('Filter Type', fontsize=20, fontweight='bold')
+    axes[1].set_ylabel('Average $||x_{true} - x_{est}||$', fontsize=20, fontweight='bold')
+    
+    # Set y-axis limit to prevent overlap with top border
+    max_error = max(avg_errors)
+    axes[1].set_ylim(0, max_error * 1.15)
+    
+    axes[1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
+    axes[1].tick_params(axis='both', which='major', labelsize=16)
+    axes[1].tick_params(axis='x', rotation=0)
+    # Add subplot index
+    axes[1].text(-0.12, 1.05, 'B', transform=axes[1].transAxes, fontsize=28, fontweight='bold', 
+                    va='bottom', ha='left')
+    
+    # Add value labels on bars
+    for bar, avg_error in zip(bars_error, avg_errors):
+        height = bar.get_height()
+        axes[1].text(bar.get_x() + bar.get_width()/2., height + max_error*0.03,
+                f'{avg_error:.4f}', ha='center', va='bottom', 
+                fontsize=14, fontweight='bold')
+    
+    # Enhanced prominent black borders for all subplots
+    for i in range(2):
+        for spine in axes[i].spines.values():
+            spine.set_edgecolor('black')
+            spine.set_linewidth(2.5)
+            spine.set_visible(True)
+    
+    # Enhance overall figure appearance
+    plt.tight_layout(pad=1.5)
+    fig.patch.set_facecolor('white')
+    
+    if save_plots:
+        filename = f"{plot_dir}/sensor_selection_comparison_mscale={m_scale:.0e}-brief.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight', 
+                   facecolor='white', edgecolor='none')
+        print(f"Plots saved to: {filename}")
+    
+    # plt.show()
+    return fig
+
 
 import random
 def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6, max_sensors=3, plot=True, m_scale=1e0):
@@ -785,7 +882,8 @@ def run_comprehensive_test(n_trials=1, H=1000, update_interval=10, num_sensors=6
 
     if plot:
         plot_comparison(avg_all_results, save_plots=True, update_interval=update_interval, m_scale=m_scale)
-    
+        plot_comparison_brief(avg_all_results, save_plots=True, update_interval=update_interval, m_scale=m_scale)
+        
     
     return avg_all_results
 
@@ -798,9 +896,9 @@ if __name__ == "__main__":
     # run_sensor_scheduling_sim(H=1000, update_interval=100, num_sensors=10, max_sensors=5)
     
     # Run comprehensive test with multiple trials
-    run_comprehensive_test(n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e2)
+    # run_comprehensive_test(n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e2)
     
     # # Run nonlinearity test
     # nonlinearity_factors = [0, 1, 1e1, 1e2]
     nonlinearity_factors = [1e2]
-    # run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
+    run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=100, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)

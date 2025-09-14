@@ -946,65 +946,63 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
     
     if plot:  
-        # Plot estimation performance comparison with publication-ready styling
-        fig, ax = plt.subplots(2, 1, figsize=(8, 12))
-        fig.suptitle('Estimation Performance Comparison', fontsize=24, y=0.98, fontweight='bold')
-        
-        # Error subplot
-        ax[0].set_title(f'Estimation Error, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
-        ax[0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
-        ax[0].set_ylabel('Mean Squared Error', fontsize=20, fontweight='bold')
-        ax[0].plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
-        ax[0].plot(err_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
-        ax[0].plot(err_list_qkf_num_avg, label='QKF(numeric)', color=PUBLICATION_COLORS['qkf_numeric'], linewidth=2.5)
-        ax[0].plot(err_list_qkf_analytic_avg, label='QKF(analytic)', color=PUBLICATION_COLORS['qkf_analytic'], linewidth=2.5)
-        ax[0].legend(frameon=True, fancybox=True, shadow=True, loc='upper right')
-        ax[0].grid(True, alpha=0.3, linestyle='--')
-        ax[0].set_yscale('log')
-        ax[0].legend(
+        # Plot estimation error comparison as separate plot with publication-ready styling
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.set_title(f'Estimation Error', fontsize=28, fontweight='bold', pad=20)
+        ax.set_xlabel('Time Step', fontsize=24, fontweight='bold')
+        ax.set_ylabel('Mean Squared Error', fontsize=24, fontweight='bold')
+        ax.set_ylim(1e0, 1e2)
+        ax.plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax.plot(err_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax.plot(err_list_qkf_num_avg, label='QKF(numeric)', color=PUBLICATION_COLORS['qkf_numeric'], linewidth=2.5)
+        ax.plot(err_list_qkf_analytic_avg, label='QKF(analytic)', color=PUBLICATION_COLORS['qkf_analytic'], linewidth=2.5)
+        ax.legend(
             frameon=True,
             fancybox=True,
             shadow=True,
-            loc='upper left',
-            bbox_to_anchor=(1.02, 1),
-            fontsize=14
+            loc='upper right',
+            fontsize=16
         )
-        # Variance subplot
-        ax[1].set_title('Estimation Variance', fontsize=20, fontweight='bold', pad=15)
-        ax[1].set_xlabel('Time Step', fontsize=20, fontweight='bold')
-        ax[1].set_ylabel('Estimation Variance', fontsize=20, fontweight='bold')
-        ax[1].plot(var_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
-        ax[1].plot(var_list_qkf_num_avg, label='QKF(numeric)', color=PUBLICATION_COLORS['qkf_numeric'], linewidth=2.5)
-        ax[1].plot(var_list_qkf_analytic_avg, label='QKF(analytic)', color=PUBLICATION_COLORS['qkf_analytic'], linewidth=2.5)
-        ukf_line = ax[1].plot(var_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)[0]
-        handles, labels = ax[1].get_legend_handles_labels()
-        # Reorder legend to original: EKF, UKF, QKF(numeric), QKF(analytic)
-        legend_order = [labels.index('EKF'), labels.index('UKF'), labels.index('QKF(numeric)'), labels.index('QKF(analytic)')]
-        ax[1].legend([handles[i] for i in legend_order], [labels[i] for i in legend_order], frameon=True, fancybox=True, shadow=True, loc='upper right')
-        ax[1].grid(True, alpha=0.3, linestyle='--')
-        ax[1].set_yscale('log')
-        ax[1].legend(
-            frameon=True,
-            fancybox=True,
-            shadow=True,
-            loc='upper left',
-            bbox_to_anchor=(1.02, 1),
-            fontsize=14
-        )
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.set_yscale('log')
+        ax.tick_params(axis='both', which='major', labelsize=16)
         plt.tight_layout()
-        plt.savefig(perf_dir + 'estimation_performance.png', dpi=300, bbox_inches='tight', facecolor='white')
+        plt.savefig(perf_dir + f'estimate_error-mscale={int(m_scale)}.png', dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close()
+        
+        # Plot estimation variance comparison as separate plot with publication-ready styling
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.set_title('Estimation Variance', fontsize=28, fontweight='bold', pad=20)
+        ax.set_xlabel('Time Step', fontsize=24, fontweight='bold')
+        ax.set_ylabel('Estimation Variance', fontsize=24, fontweight='bold')
+        ax.plot(var_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
+        ax.plot(var_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
+        ax.plot(var_list_qkf_num_avg, label='QKF(numeric)', color=PUBLICATION_COLORS['qkf_numeric'], linewidth=2.5)
+        ax.plot(var_list_qkf_analytic_avg, label='QKF(analytic)', color=PUBLICATION_COLORS['qkf_analytic'], linewidth=2.5)
+        ax.legend(
+            frameon=True,
+            fancybox=True,
+            shadow=True,
+            loc='center right',
+            fontsize=16
+        )
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.set_yscale('log')
+        ax.tick_params(axis='both', which='major', labelsize=16)
+        plt.tight_layout()
+        plt.savefig(perf_dir + f'estimation_variance-mscale={int(m_scale)}.png', dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         # Bar chart: average time consumption per time step for each controller
         avg_times = [np.mean(time_list_ekf_avg), np.mean(time_list_ukf_avg), np.mean(time_list_qkf_num_avg), np.mean(time_list_qkf_analytic_avg)]
-        controllers = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF(numeric)', 'LQG+QKF(analytic)']
+        controllers = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF\n(numeric)', 'LQG+QKF\n(analytic)']
         colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf_numeric'], PUBLICATION_COLORS['qkf_analytic']]
 
         fig, ax = plt.subplots(figsize=(8, 6))
         bars = ax.bar(controllers, avg_times, color=colors, edgecolor='black')
-        ax.set_title(f'Average Computational Time per Step, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
+        ax.set_title(f'Average Computational Time per Step, Nonlinearity Scale α = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
         ax.set_ylabel('Average Time per Step (seconds)', fontsize=20, fontweight='bold')
-        ax.set_xlabel('Controller', fontsize=20, fontweight='bold')
-        ax.tick_params(axis='x', labelsize=12, rotation=15)
+        # ax.set_xlabel('Controller', fontsize=20, fontweight='bold')
+        ax.tick_params(axis='x', labelsize=16, rotation=0)
         ax.tick_params(axis='y', labelsize=12)
         ax.grid(True, axis='y', alpha=0.3, linestyle='--')
 
@@ -1017,10 +1015,10 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         plt.close()
 
         # Plot cost performance comparison with publication-ready styling
-        fig, ax = plt.subplots(figsize=(8, 6))
-        ax.set_title(f'Cost Performance Comparison, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
-        ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
-        ax.set_ylabel('Cost-to-go (log scale)', fontsize=20, fontweight='bold')
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.set_title(f'Cost Performance Comparison', fontsize=28, fontweight='bold', pad=20)
+        ax.set_xlabel('Time Step', fontsize=24, fontweight='bold')
+        ax.set_ylabel('Cost-to-go (log scale)', fontsize=24, fontweight='bold')
         
         # Plot with enhanced styling
         ax.plot(cost_list_ekf_avg, label='LQG+EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5, linestyle='-')
@@ -1033,9 +1031,9 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
             frameon=True,
             fancybox=True,
             shadow=True,
-            loc='upper left',
-            bbox_to_anchor=(1.02, 1),
-            fontsize=14
+            loc='lower left',
+            # bbox_to_anchor=(1.02, 1),
+            fontsize=20
         )
         ax.grid(True, alpha=0.3, linestyle='--')
         ax.set_yscale('log')
@@ -1049,7 +1047,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
 
         # Plot timing performance comparison with publication-ready styling
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.set_title(f'Computational Time per Step, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
+        ax.set_title(f'Computational Time per Step, Nonlinearity Scale α = {int(m_scale)}', fontsize=20, fontweight='bold', pad=20)
         ax.set_xlabel('Time Step', fontsize=20, fontweight='bold')
         ax.set_ylabel('Time per Step (seconds)', fontsize=20, fontweight='bold')
         
@@ -1101,7 +1099,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         
         # Subplot 1: Average Convergence statistics
         ax1 = axes[0]
-        ax1.set_title(f'Average Convergence Time, Nonlinearity Scale = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
+        ax1.set_title(f'Average Convergence Time, Nonlinearity Scale α = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
         methods = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF\n(numeric)', 'LQG+QKF\n(analytic)']
         print(methods)
         avg_conv_times = [np.mean(convergence_ekf), np.mean(convergence_ukf), np.mean(convergence_qkf_num), np.mean(convergence_qkf_analytic)]
@@ -1124,7 +1122,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         ax2 = axes[1]
         # Subplot 2: Final convergence status
         ax2 = axes[1]
-        ax2.set_title(f'Convergence Rate, Nonlinearity Scale = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
+        ax2.set_title(f'Convergence Rate, Nonlinearity Scale α = {int(m_scale)}', pad=20, fontsize=24, fontweight='bold')
         conv_counts = [
             np.sum(np.array(convergence_ekf) < H),
             np.sum(np.array(convergence_ukf) < H),
@@ -1211,11 +1209,11 @@ def plot_nonlinearity_analysis(results):
         results: Dictionary containing m_scales and cost data for each method
     """
     # Create figure with publication-ready styling
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(6, 6))
     # Subplot 2: Cost vs Nonlinearity (log scale for better visualization)
-    ax.set_title('Average Cost Performance vs. Nonlinearity', fontsize=20, fontweight='bold', pad=15)
-    ax.set_xlabel('Nonlinearity Scale (m)', fontsize=20, fontweight='bold')
-    ax.set_ylabel('Average Cost', fontsize=20, fontweight='bold')
+    ax.set_title('Average Cost vs. Nonlinearity', fontsize=28, fontweight='bold', pad=15)
+    ax.set_xlabel('Nonlinearity Scale α', fontsize=24, fontweight='bold')
+    ax.set_ylabel('Average Cost', fontsize=24, fontweight='bold')
     
     
     # Plot with enhanced styling
@@ -1232,7 +1230,9 @@ def plot_nonlinearity_analysis(results):
                label='LQG+QKF(analytic)', color=PUBLICATION_COLORS['qkf_analytic'], 
                marker='d', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
     
-    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=14)
+    ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=20, 
+              loc='right', bbox_to_anchor=(1, 0.3))
+    
     ax.grid(True, alpha=0.3, linestyle='--')
     ax.tick_params(axis='both', which='major', labelsize=10)
     
