@@ -538,13 +538,16 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
                     linestyle=linestyles[i % len(linestyles)],
                     label=plot_labels[name], linewidth=2.5, alpha=alphas[i])
     
-    axes[0, 0].set_title('Cost-to-Go Comparison', fontsize=18, fontweight='bold', pad=10)
-    axes[0, 0].set_xlabel('Time Step', fontsize=16, fontweight='bold')
-    axes[0, 0].set_ylabel('Cost-to-Go (log scale)', fontsize=16, fontweight='bold')
+    axes[0, 0].set_title('Cost-to-Go Comparison', fontsize=22, fontweight='bold', pad=10)
+    axes[0, 0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
+    axes[0, 0].set_ylabel('Cost-to-Go (log scale)', fontsize=20, fontweight='bold')
     axes[0, 0].set_yscale('log')
-    axes[0, 0].legend(loc='lower left', framealpha=0.9, fontsize=12)
+    axes[0, 0].legend(loc='lower left', framealpha=0.9, fontsize=14)
     axes[0, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[0, 0].tick_params(axis='both', which='major', labelsize=12)
+    axes[0, 0].tick_params(axis='both', which='major', labelsize=16)
+    # Add subplot index
+    axes[0, 0].text(-0.06, 1.05, 'A', transform=axes[0, 0].transAxes, fontsize=28, fontweight='bold', 
+                    va='bottom', ha='left')
     
     # 2. Staged cost-to-go comparison (top right)
     for i, result in enumerate(all_results):
@@ -586,13 +589,16 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
                     label=plot_labels[name], linewidth=2.5, marker=markers[i], 
                     markersize=4, alpha=alphas[i], markevery=5)
     
-    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)', fontsize=18, fontweight='bold', pad=10)
-    axes[0, 1].set_xlabel('Phase Index', fontsize=16, fontweight='bold')
-    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)', fontsize=16, fontweight='bold')
+    axes[0, 1].set_title('Staged Cost-to-Go (Goal State Phases)', fontsize=22, fontweight='bold', pad=10)
+    axes[0, 1].set_xlabel('Phase Index', fontsize=20, fontweight='bold')
+    axes[0, 1].set_ylabel('Phase Cost-to-Go (log scale)', fontsize=20, fontweight='bold')
     axes[0, 1].set_yscale('log')
-    axes[0, 1].legend(loc='lower left', framealpha=0.9, fontsize=12)
+    axes[0, 1].legend(loc='lower left', framealpha=0.9, fontsize=14)
     axes[0, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    axes[0, 1].tick_params(axis='both', which='major', labelsize=12)
+    axes[0, 1].tick_params(axis='both', which='major', labelsize=16)
+    # Add subplot index
+    axes[0, 1].text(-0.06, 1.05, 'B', transform=axes[0, 1].transAxes, fontsize=28, fontweight='bold', 
+                    va='bottom', ha='left')
     
     # 3. Average estimation error comparison (bottom left)
     avg_errors = []
@@ -603,24 +609,27 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     bars_error = axes[1, 0].bar(plot_system_names, avg_errors, 
                                color=colors[:len(system_names)], 
                                edgecolor='black', linewidth=1.2, alpha=0.8)
-    axes[1, 0].set_title('Average Estimation Error', fontsize=18, fontweight='bold', pad=10)
-    # axes[1, 0].set_xlabel('Filter Type', fontsize=16, fontweight='bold')
-    axes[1, 0].set_ylabel('Average $||x_{true} - x_{est}||$', fontsize=16, fontweight='bold')
+    axes[1, 0].set_title('Average Estimation Error', fontsize=22, fontweight='bold', pad=10)
+    # axes[1, 0].set_xlabel('Filter Type', fontsize=20, fontweight='bold')
+    axes[1, 0].set_ylabel('Average $||x_{true} - x_{est}||$', fontsize=20, fontweight='bold')
     
     # Set y-axis limit to prevent overlap with top border
     max_error = max(avg_errors)
     axes[1, 0].set_ylim(0, max_error * 1.15)
     
     axes[1, 0].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
-    axes[1, 0].tick_params(axis='both', which='major', labelsize=14)
+    axes[1, 0].tick_params(axis='both', which='major', labelsize=16)
     axes[1, 0].tick_params(axis='x', rotation=0)
+    # Add subplot index
+    axes[1, 0].text(-0.06, 1.05, 'C', transform=axes[1, 0].transAxes, fontsize=28, fontweight='bold', 
+                    va='bottom', ha='left')
     
     # Add value labels on bars
     for bar, avg_error in zip(bars_error, avg_errors):
         height = bar.get_height()
         axes[1, 0].text(bar.get_x() + bar.get_width()/2., height + max_error*0.03,
                 f'{avg_error:.4f}', ha='center', va='bottom', 
-                fontsize=11, fontweight='bold')
+                fontsize=14, fontweight='bold')
     
     # 4. Average time consumption comparison (bottom right)
     avg_times = []
@@ -632,24 +641,27 @@ def plot_comparison(all_results, save_plots=True, plot_dir=perf_dir, update_inte
     bars = axes[1, 1].bar(axis_label_names, avg_times, 
                          color=colors[:len(system_names)], 
                          edgecolor='black', linewidth=1.2, alpha=0.8)
-    axes[1, 1].set_title('Average Time Consumption', fontsize=18, fontweight='bold', pad=10)
-    # axes[1, 1].set_xlabel('Filter Type', fontsize=16, fontweight='bold')
-    axes[1, 1].set_ylabel('Average Time (seconds)', fontsize=16, fontweight='bold')
+    axes[1, 1].set_title('Average Time Consumption', fontsize=22, fontweight='bold', pad=10)
+    # axes[1, 1].set_xlabel('Filter Type', fontsize=20, fontweight='bold')
+    axes[1, 1].set_ylabel('Average Time (seconds)', fontsize=20, fontweight='bold')
     
     # Set y-axis limit to prevent overlap with top border
     max_time = max(avg_times)
     axes[1, 1].set_ylim(0, max_time * 1.15)
     
     axes[1, 1].grid(True, alpha=0.3, linestyle='-', linewidth=0.5, axis='y')
-    axes[1, 1].tick_params(axis='both', which='major', labelsize=14)
+    axes[1, 1].tick_params(axis='both', which='major', labelsize=16)
     axes[1, 1].tick_params(axis='x', rotation=0)
+    # Add subplot index
+    axes[1, 1].text(-0.06, 1.05, 'D', transform=axes[1, 1].transAxes, fontsize=28, fontweight='bold', 
+                    va='bottom', ha='left')
     
     # Add value labels on bars
     for bar, avg_time in zip(bars, avg_times):
         height = bar.get_height()
         axes[1, 1].text(bar.get_x() + bar.get_width()/2., height + max_time*0.03,
                 f'{avg_time:.6f}', ha='center', va='bottom', 
-                fontsize=11, fontweight='bold')
+                fontsize=14, fontweight='bold')
     
     # Enhanced prominent black borders for all subplots
     for i in range(2):
@@ -789,5 +801,6 @@ if __name__ == "__main__":
     run_comprehensive_test(n_trials=1, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True, m_scale=1e0)
     
     # # Run nonlinearity test
-    nonlinearity_factors = [0, 1, 1e1, 1e2]
+    # nonlinearity_factors = [0, 1, 1e1, 1e2]
+    nonlinearity_factors = [1e2]
     run_nonlinearity_test(nonlinearity_factors=nonlinearity_factors, n_trials=1, H=1000, update_interval=100, num_sensors=10, max_sensors=5, plot=True)
