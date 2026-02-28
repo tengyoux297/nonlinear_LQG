@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 from stateDynamics import StateDynamics
 from MPC import MPC
 from scipy.optimize import differential_evolution
+from matplotlib.animation import FuncAnimation, PillowWriter
+import imageio
 
 def density_map(x, y):
     """3 Peaks: High (8,8), Medium (2,3), and Mid-High (7,2)"""
@@ -30,7 +32,7 @@ def find_max_theoretical_coverage(n_drones, gx, gy, gz, radius=1.0):
     res = differential_evolution(objective, bounds, popsize=5, tol=0.05)
     return -res.fun
 
-def run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True):
+def run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True, save_gif=True):
     # Dimensions
     n1, n2, p = 2, n_drones * 2, n_drones * 2
     dt = 0.1
@@ -52,9 +54,15 @@ def run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True):
     # Benchmark: Max Coverage Possible with 5 Drones
     max_n_drone_coverage = find_max_theoretical_coverage(n_drones, gx, gy, gz, radius=drone_radius)
 
-    if visualize:
-        plt.ion()
+    if visualize or save_gif:
         fig, ax = plt.subplots(figsize=(10, 8))
+        if visualize:
+            plt.ion()
+        else:
+            plt.ioff()
+
+    #to store frames for GIF
+    frames = []
 
     for t in range(steps):
         # 1. Solve MPC
@@ -70,7 +78,7 @@ def run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True):
         covered_val = calculate_current_coverage(current_drones, gx, gy, gz, radius=1.0)
         coverage_percent = (covered_val / max_n_drone_coverage) * 100
 
-        if visualize:
+        if visualize or save_gif:
             ax.clear()
             ax.contourf(gx, gy, gz, cmap='viridis', alpha=0.6)
             for i in range(0, len(current_drones), 2):
@@ -83,12 +91,25 @@ def run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True):
                          f"Coverage: {covered_val:.1f} / {max_n_drone_coverage:.1f} Max ({coverage_percent:.1f}%)")
             ax.set_title(title_str)
             ax.set_xlim(0, 10); ax.set_ylim(0, 10)
-            plt.pause(0.01)
+            if visualize:
+                plt.pause(0.01)
+
+            if save_gif:
+                fig.canvas.draw()
+                image = np.asarray(fig.canvas.buffer_rgba())[:, :, :3].astype(np.uint8)
+                frames.append(image.copy())
+
+    if save_gif and frames:
+        print("Saving GIF...")
+        imageio.mimsave('drone_coverage.gif', frames, fps=10)
+        print("GIF Saved.")
 
     print("Simulation Finished.")
     if visualize:
         plt.ioff()
         plt.show()
+    else:
+        plt.close()
 
 if __name__ == "__main__":
     run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True)
