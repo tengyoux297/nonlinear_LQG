@@ -101,7 +101,7 @@ def run_simulation(steps=50, n_drones=5, drone_radius=1.0, visualize=True, save_
 
     if save_gif and frames:
         print("Saving GIF...")
-        imageio.mimsave('drone_coverage.gif', frames, fps=10)
+        imageio.mimsave('./MPC/results/drone_coverage.gif', frames, fps=10)
         print("GIF Saved.")
 
     print("Simulation Finished.")
