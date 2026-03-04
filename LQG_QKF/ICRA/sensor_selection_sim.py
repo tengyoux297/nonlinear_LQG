@@ -6,10 +6,15 @@ import random
 import itertools
 import time
 
+
+
 # Import specific modules instead of wildcard imports
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '2025_summer'))
+
+PROJ_DIR = 'D:/AC/UCLA/ECE/UCLA_LEMUR/nonlinear_LQG/LQG_QKF/ICRA/'
+os.chdir(PROJ_DIR)
+
 from LQG_QKF import LQG, generate_stable_system_parameters, validate_stable_parameters, generate_random_symmetric_matrix, generate_goal_state
 from stateDynamics import StateDynamics, sensor, Vec, invVec
 from typing import Literal
