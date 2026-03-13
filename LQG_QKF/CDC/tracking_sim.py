@@ -347,25 +347,7 @@ plt.tight_layout(rect=[0, 0, 0.85, 1])  # leave space for legend on the right
 plt.savefig(os.path.join(sim_perf_dir, 'tracking_paths_actual_vs_reference.png'), dpi=150, bbox_inches='tight')
 plt.close()
 
-# (2) Control cost-to-go vs time
-if 'cost_to_go_mean' in results[FILTER_KEYS[0]]:
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for filter_key in FILTER_KEYS:
-        mu = results[filter_key]['cost_to_go_mean']
-        std = results[filter_key].get('cost_to_go_std', np.zeros_like(mu))
-        t = np.arange(len(mu))
-        ax.plot(mu, color=PUBLICATION_COLORS.get(filter_key, 'gray'), lw=1.5, label=FILTER_LABELS[filter_key])
-        ax.fill_between(t, mu - std, mu + std, color=PUBLICATION_COLORS.get(filter_key, 'gray'), alpha=0.2)
-    ax.set_xlabel('Time step')
-    ax.set_ylabel('Control cost-to-go')
-    ax.set_title(f'Control Cost-to-Go vs Time (n_trials={trials})')
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout(rect=[0, 0, 0.85, 1])
-    plt.savefig(os.path.join(sim_perf_dir, 'tracking_cost_to_go.png'), dpi=150, bbox_inches='tight')
-    plt.close()
-
-# (3) Estimation variance (trace P) and MSE (estimate vs reference) vs time
+# (2) Estimation variance (trace P) and MSE (estimate vs reference) vs time
 # Line styles so overlapping curves (e.g. QKF analytic vs numeric) stay distinguishable
 VAR_MSE_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1))}
 if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean' in results[FILTER_KEYS[0]]:
@@ -403,21 +385,30 @@ if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean'
     axes[1].grid(True, alpha=0.3, which='both')
     plt.tight_layout(rect=[0, 0, 0.85, 1])
     plt.savefig(os.path.join(sim_perf_dir, 'tracking_estimation_variance_and_mse.png'), dpi=150, bbox_inches='tight')
-    plt.close()
-
-# (4) Running time (mean ± std total time per filter)
+# (3) Control effort (mean ± std) and running time (mean ± std total time per filter)
 if 'total_time_mean' in results[FILTER_KEYS[0]]:
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
     labels = [FILTER_LABELS[k] for k in FILTER_KEYS]
     colors = [PUBLICATION_COLORS.get(k, 'gray') for k in FILTER_KEYS]
+
+    # Control effort: mean ||u|| and std over trials
+    mean_effort = [results[k]['mean_control_effort'] for k in FILTER_KEYS]
+    std_effort = [results[k].get('std_control_effort', 0) for k in FILTER_KEYS]
+    axes[0].bar(labels, mean_effort, yerr=std_effort, color=colors, edgecolor='black', capsize=5)
+    axes[0].set_ylabel('Mean control effort ||u||')
+    axes[0].set_title(f'Control Effort by Filter (mean ± std, n_trials={trials})')
+    axes[0].tick_params(axis='x', rotation=15)
+
+    # Running time: mean ± std total time per filter
     total_mean = [results[k]['total_time_mean'] for k in FILTER_KEYS]
     total_std = [results[k].get('total_time_std', 0) for k in FILTER_KEYS]
-    ax.bar(labels, total_mean, yerr=total_std, color=colors, edgecolor='black', capsize=5)
-    ax.set_ylabel('Total running time (s)')
-    ax.set_title(f'Running Time per Trial (mean ± std, n_trials={trials})')
-    ax.tick_params(axis='x', rotation=15)
+    axes[1].bar(labels, total_mean, yerr=total_std, color=colors, edgecolor='black', capsize=5)
+    axes[1].set_ylabel('Total running time (s)')
+    axes[1].set_title(f'Running Time per Trial (mean ± std, n_trials={trials})')
+    axes[1].tick_params(axis='x', rotation=15)
+
     plt.tight_layout()
-    plt.savefig(os.path.join(sim_perf_dir, 'tracking_running_time.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(sim_perf_dir, 'tracking_control_effort_and_time.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
 print('Tracking sim done. Results in:', sim_test_dir)
