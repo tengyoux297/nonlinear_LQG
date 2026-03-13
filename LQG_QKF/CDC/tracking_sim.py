@@ -114,19 +114,17 @@ Q[:n, :n] = Q_small
 R = 0.12 * np.eye(p)
 
 # ---------------------------------------------------------------------------
-# 5. One trial: same setting, same reference path, one shared true trajectory; all filters see same measurements
+# 5. One trial: same setting, same reference path; each filter has its own actual trajectory
 # ---------------------------------------------------------------------------
 def run_one_trial_all_filters(H, ref_traj, x0, goal0, rand_seed=0, n_particles=500):
     """
-    Run one trial with one shared true state and reference. All five filters observe the same
-    measurement at each step. True state is advanced with the first filter's (EKF) control.
-    Returns dict: true_path, ref_path, and per filter_key the same per-filter result dict.
+    Run one trial with the same reference path but independent actual trajectories per filter.
+    Each filter's own dynamics F is advanced using its control.
+    Returns dict with per-filter result dicts compatible with aggregate_trials.
     """
     np.random.seed(rand_seed)
-    # Single shared true dynamics and one sensor for generating measurements
-    F_true = StateDynamics(n1, n2, p, W, A_E, A_S, B_S, B_E=B_E)
+    # Single shared sensor model; measurements depend on each filter's actual state x_actual
     shared_sensor = sensor(C, M, V, measA=measA)
-    F_true.set_x(x0.copy())
 
     # Five LQG instances (same setting, different filter)
     lqgs = []
@@ -137,18 +135,26 @@ def run_one_trial_all_filters(H, ref_traj, x0, goal0, rand_seed=0, n_particles=5
         if ft == 'pf':
             kw['n_particles'] = n_particles
         lqg = LQG(**kw)
-        lqg.F.set_x(x0.copy())
+        lqg.F.set_x(x0.copy())  # actual state for this filter
         lqg.x_hat = x0.copy()
         lqg.sync_qkf_initial_state()  # so QKF Z_est matches x0 and path does not start with a jump
         lqgs.append((filter_key, lqg))
 
-    true_path = [F_true.get_x().copy()]
     ref_path = [ref_traj[0].copy()]
-    per_filter = {fk: {'est_path': [lqg.x_hat.copy()], 'tracking_error': [], 'control_effort': [],
-                      'stage_cost': [], 'estimation_var': [], 'mse_actual_goal': [], 'mse_est_goal': [],
-                      'time_per_step': []}
-                  for fk, lqg in lqgs}
-    driver_u = np.zeros((p, 1))
+    per_filter = {
+        fk: {
+            'actual_path': [lqg.F.get_x().copy()],
+            'est_path': [lqg.x_hat.copy()],
+            'tracking_error': [],
+            'control_effort': [],
+            'stage_cost': [],
+            'estimation_var': [],
+            'mse_actual_goal': [],
+            'mse_est_goal': [],
+            'time_per_step': [],
+        }
+        for fk, lqg in lqgs
+    }
 
     # Reference preview: steer toward ref a few steps ahead so we lead the curve (smoother tracking)
     REF_PREVIEW_STEPS = 3
@@ -156,47 +162,41 @@ def run_one_trial_all_filters(H, ref_traj, x0, goal0, rand_seed=0, n_particles=5
         # Goal = reference at end of step, with optional preview (ahead) for feedforward
         ref_idx = min(step + REF_PREVIEW_STEPS, len(ref_traj) - 1)
         x_ref = ref_traj[ref_idx]
-        # One measurement for all (same true state)
-        y_meas = shared_sensor.measure(F_true.get_x())
-        # Sync each filter's F to true state and applied control for prediction
-        for fk, lqg in lqgs:
-            lqg.F.set_x(F_true.get_x().copy())
-            lqg.F.set_u(driver_u)
         for fk, lqg in lqgs:
             t0 = time.perf_counter()
+            # For each filter: measure its own actual state, update estimator and controller,
+            # then advance its dynamics.
+            x_actual = lqg.F.get_x()
+            y_meas = shared_sensor.measure(x_actual)
             lqg.set_goal_state(x_ref)
             lqg.update_lqe(y_meas=y_meas)
             lqg.update_lqr()
+            lqg.F.forward()
             per_filter[fk]['time_per_step'].append(time.perf_counter() - t0)
-        driver_u = lqgs[0][1].F.get_u().copy()
-        F_true.set_u(driver_u)
-        F_true.forward()
-        x_true = F_true.get_x()
         x_ref_step = ref_traj[min(step, len(ref_traj) - 1)]
-        true_path.append(x_true.copy())
         ref_path.append(x_ref_step.copy())
         for fk, lqg in lqgs:
+            x_actual = lqg.F.get_x()
             x_est = lqg.x_hat
             u = lqg.F.get_u()
+            per_filter[fk]['actual_path'].append(x_actual.copy())
             per_filter[fk]['est_path'].append(x_est.copy())
-            per_filter[fk]['tracking_error'].append(np.linalg.norm(x_true[:2] - x_ref_step[:2]).item())
+            per_filter[fk]['tracking_error'].append(np.linalg.norm(x_actual[:2] - x_ref_step[:2]).item())
             per_filter[fk]['control_effort'].append(np.linalg.norm(u).item())
             dx = (x_est - x_ref_step).reshape(-1, 1)
             per_filter[fk]['stage_cost'].append((dx.T @ Q_small @ dx + u.T @ R @ u).item())
-            per_filter[fk]['mse_actual_goal'].append(np.sum((x_true - x_ref_step) ** 2).item())
+            per_filter[fk]['mse_actual_goal'].append(np.sum((x_actual - x_ref_step) ** 2).item())
             per_filter[fk]['mse_est_goal'].append(np.sum((x_est - x_ref_step) ** 2).item())
             var_t = np.trace(lqg.Pz_est[:lqg.n, :lqg.n]) if lqg.filter_type == 'qkf' else np.trace(lqg.P_est)
             per_filter[fk]['estimation_var'].append(np.asarray(var_t).item())
-        for fk, lqg in lqgs:
-            lqg.F.set_x(F_true.get_x().copy())
-            lqg.F.set_u(driver_u)
 
-    # Build return: one true_path, ref_path; per-filter dicts compatible with aggregate_trials
-    out = {'true_path': np.array(true_path).squeeze(), 'ref_path': np.array(ref_path).squeeze()}
+    # Build return: per-filter dicts compatible with aggregate_trials
+    out = {'ref_path': np.array(ref_path).squeeze()}
     for fk, _ in lqgs:
         sc = np.array(per_filter[fk]['stage_cost'])
+        ap = np.array(per_filter[fk]['actual_path']).squeeze()
         out[fk] = {
-            'true_path': out['true_path'],
+            'true_path': ap,  # keep key name for compatibility; values are actual trajectories
             'est_path': np.array(per_filter[fk]['est_path']).squeeze(),
             'ref_path': out['ref_path'],
             'tracking_error': np.array(per_filter[fk]['tracking_error']),
@@ -272,7 +272,7 @@ def aggregate_trials(trial_results_list):
 # 7. Main: multi-trial run with cache resume, aggregate, save pkl, plot
 # ---------------------------------------------------------------------------
 H = 200
-trials = 1
+trials = 100
 rand_seed_base = 64
 ref_traj = reference_trajectory(H, dt)
 x0 = ref_traj[0].copy()
@@ -359,9 +359,9 @@ if 'cost_to_go_mean' in results[FILTER_KEYS[0]]:
     ax.set_xlabel('Time step')
     ax.set_ylabel('Control cost-to-go')
     ax.set_title(f'Control Cost-to-Go vs Time (n_trials={trials})')
-    ax.legend(loc='upper right', fontsize=9)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
     ax.grid(True, alpha=0.3)
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
     plt.savefig(os.path.join(sim_perf_dir, 'tracking_cost_to_go.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
@@ -383,7 +383,7 @@ if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean'
     axes[0].set_ylabel('Estimation variance (trace P)')
     axes[0].set_yscale('log')
     axes[0].set_title(f'Estimation Variance vs Time (n_trials={trials})')
-    axes[0].legend(loc='upper right', fontsize=9)
+    axes[0].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
     axes[0].grid(True, alpha=0.3, which='both')
     for filter_key in FILTER_KEYS:
         t = np.arange(len(results[filter_key]['mse_est_goal_mean']))
@@ -399,9 +399,9 @@ if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean'
     axes[1].set_ylabel('MSE (estimate vs reference)')
     axes[1].set_yscale('log')
     axes[1].set_title('MSE (Estimate vs Reference) vs Time')
-    axes[1].legend(loc='upper right', fontsize=9)
+    axes[1].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
     axes[1].grid(True, alpha=0.3, which='both')
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
     plt.savefig(os.path.join(sim_perf_dir, 'tracking_estimation_variance_and_mse.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
@@ -420,28 +420,14 @@ if 'total_time_mean' in results[FILTER_KEYS[0]]:
     plt.savefig(os.path.join(sim_perf_dir, 'tracking_running_time.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
-# Optional: tracking error and control effort summary bars
-fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-mean_err = [results[k]['mean_tracking_error'] for k in FILTER_KEYS]
-std_err = [results[k]['std_tracking_error'] for k in FILTER_KEYS]
-mean_effort = [results[k]['mean_control_effort'] for k in FILTER_KEYS]
-std_effort = [results[k]['std_control_effort'] for k in FILTER_KEYS]
-labels = [FILTER_LABELS[k] for k in FILTER_KEYS]
-colors = [PUBLICATION_COLORS.get(k, 'gray') for k in FILTER_KEYS]
-axes[0].bar(labels, mean_err, yerr=std_err, color=colors, edgecolor='black', capsize=5)
-axes[0].set_ylabel('Mean tracking error')
-axes[0].set_title(f'Mean Tracking Error by Filter (n_trials={trials})')
-axes[0].tick_params(axis='x', rotation=15)
-axes[1].bar(labels, mean_effort, yerr=std_effort, color=colors, edgecolor='black', capsize=5)
-axes[1].set_ylabel('Mean ||u||')
-axes[1].set_title(f'Mean Control Effort by Filter (n_trials={trials})')
-axes[1].tick_params(axis='x', rotation=15)
-plt.tight_layout()
-plt.savefig(os.path.join(sim_perf_dir, 'tracking_summary_bars.png'), dpi=150, bbox_inches='tight')
-plt.close()
-
 print('Tracking sim done. Results in:', sim_test_dir)
 print('  trials:', trials)
 print('  pkl (aggregated): ', sim_pkl_dir)
 print('  cache (per-trial):', sim_cache_dir)
 print('  plots:             ', sim_perf_dir)
+
+# plot performance vs time
+import subprocess
+subprocess.run(['python', 'plot-perf_vs_time.py', '--metric', 'cost'])
+subprocess.run(['python', 'plot-perf_vs_time.py', '--metric', 'accuracy'])
+subprocess.run(['python', 'plot-perf_vs_time.py', '--metric', 'variance'])
