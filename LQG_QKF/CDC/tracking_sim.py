@@ -29,14 +29,16 @@ FILTER_CONFIGS = [
     ('qkf', 'aug_analytic'),
     ('qkf', 'aug_numeric'),
     ('pf', 'orig'),
+    ('ckf', 'orig'),
 ]
-FILTER_KEYS = ['ekf', 'ukf', 'qkf_analytic', 'qkf_numeric', 'pf']
+FILTER_KEYS = ['ekf', 'ukf', 'qkf_analytic', 'qkf_numeric', 'pf', 'ckf']
 FILTER_LABELS = {
     'ekf': 'LQG+EKF',
     'ukf': 'LQG+UKF',
     'qkf_analytic': 'LQG+QKF(analytic)',
     'qkf_numeric': 'LQG+QKF(numeric)',
     'pf': 'LQG+PF',
+    'ckf': 'LQG+CKF'
 }
 
 # ---------------------------------------------------------------------------
@@ -318,6 +320,7 @@ PATH_LINESTYLE = {
     'qkf_analytic': '-.', # dash-dot
     'qkf_numeric': ':',   # dotted
     'pf': (0, (3, 1, 1, 1)),  # dash-dot-dot
+    'ckf': (0, (3, 2, 1, 1)), # whatever this is
 }
 ax.plot(ref_path_mean[:, 0], ref_path_mean[:, 2], 'k-', lw=2, label='Reference (Figure-8)', zorder=5)
 for filter_key in FILTER_KEYS:
