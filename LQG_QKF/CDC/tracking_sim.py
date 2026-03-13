@@ -284,10 +284,14 @@ goal0 = ref_traj[0].copy()
 all_trials_by_filter = {k: [] for k in FILTER_KEYS}
 for i in tqdm(range(trials), desc='Trials', leave=True, position=0):
     cache_path = os.path.join(sim_cache_dir, f'tracking_trial={i}.pkl')
+    trial_out = None
     if os.path.exists(cache_path):
         with open(cache_path, 'rb') as f:
             trial_out = pkl.load(f)
-    else:
+        # Stale cache: missing keys added after original run (e.g. ckf). Re-run and overwrite.
+        if not all(fk in trial_out for fk in FILTER_KEYS):
+            trial_out = None
+    if trial_out is None:
         trial_out = run_one_trial_all_filters(H, ref_traj, x0, goal0, rand_seed=rand_seed_base + i)
         with open(cache_path, 'wb') as f:
             pkl.dump(trial_out, f)
@@ -370,7 +374,7 @@ if 'cost_to_go_mean' in results[FILTER_KEYS[0]]:
 
 # (3) Estimation variance (trace P) and MSE (estimate vs reference) vs time
 # Line styles so overlapping curves (e.g. QKF analytic vs numeric) stay distinguishable
-VAR_MSE_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1))}
+VAR_MSE_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1)), 'ckf': (0, (3, 2, 1, 1))}
 if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean' in results[FILTER_KEYS[0]]:
     fig, axes = plt.subplots(2, 1, figsize=(8, 8))
     for filter_key in FILTER_KEYS:

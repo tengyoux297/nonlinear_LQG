@@ -747,45 +747,51 @@ class LQG:
             S = np.linalg.cholesky(self.P_est)
         except np.linalg.LinAlgError:
             S = np.linalg.cholesky(self.P_est + np.eye(n) * 1e-9)
-        
-        X = self.x_hat + S @ xi
-        X_pred = self.A @ X + self.B @ self.u
+
+        u = self.F.get_u()
+        X = self.x_hat + S @ xi                       # cubature points (n, 2n)
+        X_pred = self.A @ X + self.B @ u              # propagate each point
         x_pred = np.sum(X_pred, axis=1, keepdims=True) * w
-        
+
         P_pred = np.zeros((n, n))
         for i in range(m_pts):
             dx = X_pred[:, [i]] - x_pred
             P_pred += w * (dx @ dx.T)
         P_pred += self.W
 
-        # 2. Update
+        # 2. Measurement update
+        # Get actual measurement (shared y_meas or measure from true state)
         if y_meas is not None:
-            try:
-                S_p = np.linalg.cholesky(P_pred)
-            except np.linalg.LinAlgError:
-                S_p = np.linalg.cholesky(P_pred + np.eye(n) * 1e-9)
-            
-            X_pts = x_pred + S_p @ xi
-            m_dim = y_meas.shape[0]
-            Z_pts = np.zeros((m_dim, m_pts))
-            for i in range(m_pts):
-                Z_pts[:, [i]] = self.sensor.measure_pred(X_pts[:, [i]])
-            
-            z_hat = np.sum(Z_pts, axis=1, keepdims=True) * w
-            P_zz = np.zeros((m_dim, m_dim))
-            P_xz = np.zeros((n, m_dim))
-            for i in range(m_pts):
-                dz = Z_pts[:, [i]] - z_hat
-                dx = X_pts[:, [i]] - x_pred
-                P_zz += w * (dz @ dz.T)
-                P_xz += w * (dx @ dz.T)
-            P_zz += self.V
-            
-            K = P_xz @ np.linalg.inv(P_zz)
-            self.x_hat = x_pred + K @ (y_meas - z_hat)
-            self.P_est = P_pred - K @ P_zz @ K.T
+            y = np.asarray(y_meas).reshape(-1, 1)
         else:
-            self.x_hat, self.P_est = x_pred, P_pred
+            y = self.sensor.measure(self.F.get_x())
+
+        try:
+            S_p = np.linalg.cholesky(P_pred)
+        except np.linalg.LinAlgError:
+            S_p = np.linalg.cholesky(P_pred + np.eye(n) * 1e-9)
+
+        X_pts = x_pred + S_p @ xi
+        m_dim = y.shape[0]
+        Z_pts = np.zeros((m_dim, m_pts))
+        for i in range(m_pts):
+            Z_pts[:, [i]] = self.sensor.measure_pred(X_pts[:, [i]])
+
+        z_hat = np.sum(Z_pts, axis=1, keepdims=True) * w
+        P_zz = np.zeros((m_dim, m_dim))
+        P_xz = np.zeros((n, m_dim))
+        for i in range(m_pts):
+            dz = Z_pts[:, [i]] - z_hat
+            dx = X_pts[:, [i]] - x_pred
+            P_zz += w * (dz @ dz.T)
+            P_xz += w * (dx @ dz.T)
+        P_zz += self.sensor.V
+
+        K = P_xz @ np.linalg.inv(P_zz)
+        self.x_hat_prev = self.x_hat.copy()
+        self.x_hat = x_pred + K @ (y - z_hat)
+        self.P_est = P_pred - K @ P_zz @ K.T
+        return K
     
     def update_lqe(self, y_meas=None):
         """Update state estimate. If y_meas is provided, use it instead of measuring from self.F (for shared-measurement trials)."""
@@ -798,11 +804,11 @@ class LQG:
         elif self.filter_type == 'ukf':
             K = self.update_lqe_ukf(y_meas=y_meas)
         elif self.filter_type == 'pf':
-            self.update_lqe_pf(y_meas=y_meas)
+            K = self.update_lqe_pf(y_meas=y_meas)
         elif self.filter_type == 'ckf':
-            self.update_lqe_ckf(y_meas=y_meas)
+            K = self.update_lqe_ckf(y_meas=y_meas)
         else:
-            raise ValueError("Invalid filter type. Choose 'qkf', 'ekf', 'kf', 'ukf', or 'pf'.")
+            raise ValueError("Invalid filter type. Choose 'qkf', 'ekf', 'kf', 'ukf', 'pf', or 'ckf'.")
         t = self.F.t
         # print(f'  t={t:4d}', f'‖K_{self.filter_type}‖₂=', np.linalg.norm(K),) if t % 100 == 0 else None
         return
@@ -1075,7 +1081,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
                     rand_seed=seed_i,
                 )
                 with open(trial_cache_file, "wb") as f:
-                    pkl.dump((ekf_r, ukf_r, qa_r, qn_r, pf_r), f)
+                    pkl.dump((ekf_r, ukf_r, qa_r, qn_r, pf_r, ckf_r), f)
             err_list_ekf_all.append(ekf_r[0]); var_list_ekf_all.append(ekf_r[1]); cost_list_ekf_all.append(ekf_r[2]); time_list_ekf_all.append(ekf_r[3])
             err_list_ukf_all.append(ukf_r[0]); var_list_ukf_all.append(ukf_r[1]); cost_list_ukf_all.append(ukf_r[2]); time_list_ukf_all.append(ukf_r[3])
             err_list_qkf_analytic_all.append(qa_r[0]); var_list_qkf_analytic_all.append(qa_r[1]); cost_list_qkf_analytic_all.append(qa_r[2]); time_list_qkf_analytic_all.append(qa_r[3])
@@ -1184,7 +1190,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         plt.savefig(perf_dir + 'estimation_performance.png', dpi=300, bbox_inches='tight', facecolor='white')
         plt.close()
         # Bar chart: average time consumption per time step for each controller
-        avg_times = [np.mean(time_list_ekf_avg), np.mean(time_list_ukf_avg), np.mean(time_list_qkf_num_avg), np.mean(time_list_qkf_analytic_avg), np.mean(time_list_pf_avg)]
+        avg_times = [np.mean(time_list_ekf_avg), np.mean(time_list_ukf_avg), np.mean(time_list_qkf_num_avg), np.mean(time_list_qkf_analytic_avg), np.mean(time_list_pf_avg), np.mean(time_list_ckf_avg)]
         controllers = ['LQG+EKF', 'LQG+UKF', 'iLQG+QKF(numeric)', 'LQG+QKF(analytic)', 'LQG+PF', 'LQG+CKF']
         colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf_numeric'], PUBLICATION_COLORS['qkf_analytic'], PUBLICATION_COLORS['pf'], PUBLICATION_COLORS['ckf']]
 
@@ -1288,7 +1294,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
             convergence_qkf_num.append(conv_qkf_num if conv_qkf_num is not None else H)
             convergence_qkf_analytic.append(conv_qkf_analytic if conv_qkf_analytic is not None else H)
             convergence_pf.append(conv_pf if conv_pf is not None else H)
-            convergence_ckf.append(conv_pf if conv_ckf is not None else H)
+            convergence_ckf.append(conv_ckf if conv_ckf is not None else H)
 
         # Subplot 1: Average Convergence statistics
         ax1 = axes[0]
@@ -1317,6 +1323,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
             np.sum(np.array(convergence_qkf_num) < H),
             np.sum(np.array(convergence_qkf_analytic) < H),
             np.sum(np.array(convergence_pf) < H),
+            np.sum(np.array(convergence_ckf) < H),
         ]
         conv_percentages = [count/trials*100 for count in conv_counts]
         colors = [PUBLICATION_COLORS['ekf'], PUBLICATION_COLORS['ukf'], PUBLICATION_COLORS['qkf_numeric'], PUBLICATION_COLORS['qkf_analytic'], PUBLICATION_COLORS['pf']]
@@ -1346,6 +1353,7 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         print(f"iLQG+QKF(numeric) - Avg convergence time: {np.mean(convergence_qkf_num):.1f} ± {np.std(convergence_qkf_num):.1f}")
         print(f"LQG+QKF(analytic) - Avg convergence time: {np.mean(convergence_qkf_analytic):.1f} ± {np.std(convergence_qkf_analytic):.1f}")
         print(f"LQG+PF - Avg convergence time: {np.mean(convergence_pf):.1f} ± {np.std(convergence_pf):.1f}")
+        print(f"LQG+CKF - Avg convergence time: {np.mean(convergence_ckf):.1f} ± {np.std(convergence_ckf):.1f}")
         print(f"Convergence rates: LQG+EKF {conv_percentages[0]:.1f}%, LQG+UKF {conv_percentages[1]:.1f}%, iLQG+QKF(numeric) {conv_percentages[2]:.1f}%, LQG+QKF(analytic) {conv_percentages[3]:.1f}%, LQG+PF {conv_percentages[4]:.1f}%")
 
         # Print timing summary statistics
@@ -1355,9 +1363,10 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         print(f"iLQG+QKF(numeric) - Avg time per step: {np.mean(time_list_qkf_num_avg):.4f} ± {np.std(time_list_qkf_num_avg):.4f} seconds")
         print(f"LQG+QKF(analytic) - Avg time per step: {np.mean(time_list_qkf_analytic_avg):.4f} ± {np.std(time_list_qkf_analytic_avg):.4f} seconds")
         print(f"LQG+PF - Avg time per step: {np.mean(time_list_pf_avg):.4f} ± {np.std(time_list_pf_avg):.4f} seconds")
+        print(f"LQG+CKF - Avg time per step: {np.mean(time_list_ckf_avg):.4f} ± {np.std(time_list_ckf_avg):.4f} seconds")
         print(f"Total simulation time: LQG+EKF {np.sum(time_list_ekf_avg):.2f}s, LQG+UKF {np.sum(time_list_ukf_avg):.2f}s, iLQG+QKF(numeric) {np.sum(time_list_qkf_num_avg):.2f}s, LQG+QKF(analytic) {np.sum(time_list_qkf_analytic_avg):.2f}s, LQG+PF {np.sum(time_list_pf_avg):.2f}s")
 
-    return cost_list_ekf_avg, cost_list_ukf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_pf_avg
+    return cost_list_ekf_avg, cost_list_ukf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_pf_avg, cost_list_ckf_avg
 
 def nonlinearity_test(H=1000, trials=20):
     m_scales = [0, 1, 1e1, 1e2, 1e3]
@@ -1370,18 +1379,20 @@ def nonlinearity_test(H=1000, trials=20):
         'ukf_costs': [],
         'qkf_numeric_costs': [],
         'qkf_analytic_costs': [],
-        'pf_costs': []
+        'pf_costs': [],
+        'ckf_costs': []
     }
 
     for i, m_scale in enumerate(m_scales):
         print(f"Testing with m_scale={m_scale}")
-        cost_list_ekf_avg, cost_list_ukf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_pf_avg = test(H=H, trials=trials, plot=False, m_scale=m_scale, rand_seed=rand_seed)
+        cost_list_ekf_avg, cost_list_ukf_avg, cost_list_qkf_num_avg, cost_list_qkf_analytic_avg, cost_list_pf_avg, cost_list_ckf_avg = test(H=H, trials=trials, plot=False, m_scale=m_scale, rand_seed=rand_seed)
 
         all_results['ekf_costs'].append(np.mean(cost_list_ekf_avg))
         all_results['ukf_costs'].append(np.mean(cost_list_ukf_avg))
         all_results['qkf_numeric_costs'].append(np.mean(cost_list_qkf_num_avg))
         all_results['qkf_analytic_costs'].append(np.mean(cost_list_qkf_analytic_avg))
         all_results['pf_costs'].append(np.mean(cost_list_pf_avg))
+        all_results['ckf_costs'].append(np.mean(cost_list_ckf_avg))
     
     # Plot nonlinearity analysis results
     plot_nonlinearity_analysis(all_results)
@@ -1420,6 +1431,9 @@ def plot_nonlinearity_analysis(results):
     ax.loglog(results['m_scales'], results['pf_costs'],
                label='LQG+PF', color=PUBLICATION_COLORS['pf'],
                marker='v', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
+    ax.loglog(results['m_scales'], results['ckf_costs'],
+               label='LQG+CKF', color=PUBLICATION_COLORS['ckf'],
+               marker='v', markersize=8, linewidth=3, markeredgecolor='white', markeredgewidth=1)
 
     ax.legend(frameon=True, fancybox=True, shadow=True, fontsize=14)
     ax.grid(True, alpha=0.3, linestyle='--')
@@ -1437,6 +1451,7 @@ def plot_nonlinearity_analysis(results):
     print(f"QKF(numeric) average costs: {[f'{cost:.2e}' for cost in results['qkf_numeric_costs']]}")
     print(f"QKF(analytic) average costs: {[f'{cost:.2e}' for cost in results['qkf_analytic_costs']]}")
     print(f"PF average costs: {[f'{cost:.2e}' for cost in results['pf_costs']]}")
+    print(f"PF average costs: {[f'{cost:.2e}' for cost in results['ckf_costs']]}")
 
 
 if __name__ == "__main__":
@@ -1455,7 +1470,3 @@ if __name__ == "__main__":
         C_scale=[0.5, 2.0], # scale for C (linear term) in the measurement function
     )
     nonlinearity_test(H=H, trials=N)
-        
-
-
-
