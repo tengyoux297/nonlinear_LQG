@@ -226,6 +226,8 @@ def aggregate_trials(trial_results_list):
     ref_path = np.array([r['ref_path'] for r in trial_results_list])
     tracking_error = np.array([r['tracking_error'] for r in trial_results_list])
     control_effort = np.array([r['control_effort'] for r in trial_results_list])
+    # Estimation error over full state: ||x_true - x_est||_2 at each time step
+    estimation_error = np.linalg.norm(true_path - est_path, axis=2)
     per_trial_mean_err = np.mean(tracking_error, axis=1)
     per_trial_mean_effort = np.mean(control_effort, axis=1)
 
@@ -236,6 +238,8 @@ def aggregate_trials(trial_results_list):
         'ref_path_mean': np.mean(ref_path, axis=0),
         'tracking_error_mean': np.mean(tracking_error, axis=0),
         'tracking_error_std': np.std(tracking_error, axis=0),
+        'estimation_error_mean': np.mean(estimation_error, axis=0),
+        'estimation_error_std': np.std(estimation_error, axis=0),
         'control_effort_mean': np.mean(control_effort, axis=0),
         'control_effort_std': np.std(control_effort, axis=0),
         'n_trials': n_trials,
@@ -272,7 +276,7 @@ def aggregate_trials(trial_results_list):
 # 7. Main: multi-trial run with cache resume, aggregate, save pkl, plot
 # ---------------------------------------------------------------------------
 H = 200
-trials = 100
+trials = 10
 rand_seed_base = 64
 ref_traj = reference_trajectory(H, dt)
 x0 = ref_traj[0].copy()
@@ -347,10 +351,10 @@ plt.tight_layout(rect=[0, 0, 0.85, 1])  # leave space for legend on the right
 plt.savefig(os.path.join(sim_perf_dir, 'tracking_paths_actual_vs_reference.png'), dpi=150, bbox_inches='tight')
 plt.close()
 
-# (2) Estimation variance (trace P) and MSE (estimate vs reference) vs time
+# (2) Estimation variance (trace P) and estimation error vs time
 # Line styles so overlapping curves (e.g. QKF analytic vs numeric) stay distinguishable
-VAR_MSE_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1))}
-if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean' in results[FILTER_KEYS[0]]:
+VAR_ERR_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1))}
+if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'estimation_error_mean' in results[FILTER_KEYS[0]]:
     fig, axes = plt.subplots(2, 1, figsize=(8, 8))
     for filter_key in FILTER_KEYS:
         t = np.arange(len(results[filter_key]['estimation_variance_mean']))
@@ -359,7 +363,7 @@ if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean'
         mu_v_plot = np.maximum(mu_v, 1e-12)
         lo_v = np.maximum(mu_v - std_v, 1e-12)
         hi_v = np.maximum(mu_v + std_v, 1e-12)
-        ls = VAR_MSE_LINESTYLES.get(filter_key, '-')
+        ls = VAR_ERR_LINESTYLES.get(filter_key, '-')
         axes[0].plot(mu_v_plot, color=PUBLICATION_COLORS.get(filter_key, 'gray'), lw=1.5, ls=ls, label=FILTER_LABELS[filter_key])
         axes[0].fill_between(t, lo_v, hi_v, color=PUBLICATION_COLORS.get(filter_key, 'gray'), alpha=0.2)
     axes[0].set_ylabel('Estimation variance (trace P)')
@@ -368,23 +372,45 @@ if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'mse_est_goal_mean'
     axes[0].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
     axes[0].grid(True, alpha=0.3, which='both')
     for filter_key in FILTER_KEYS:
-        t = np.arange(len(results[filter_key]['mse_est_goal_mean']))
-        mu_m = results[filter_key]['mse_est_goal_mean']
-        std_m = results[filter_key].get('mse_est_goal_std', np.zeros_like(mu_m))
+        t = np.arange(len(results[filter_key]['estimation_error_mean']))
+        mu_m = results[filter_key]['estimation_error_mean']
+        std_m = results[filter_key].get('estimation_error_std', np.zeros_like(mu_m))
         mu_plot = np.maximum(mu_m, 1e-10)
         lo = np.maximum(mu_m - std_m, 1e-10)
         hi = np.maximum(mu_m + std_m, 1e-10)
-        ls = VAR_MSE_LINESTYLES.get(filter_key, '-')
+        ls = VAR_ERR_LINESTYLES.get(filter_key, '-')
         axes[1].plot(mu_plot, color=PUBLICATION_COLORS.get(filter_key, 'gray'), lw=1.5, ls=ls, label=FILTER_LABELS[filter_key])
         axes[1].fill_between(t, lo, hi, color=PUBLICATION_COLORS.get(filter_key, 'gray'), alpha=0.2)
     axes[1].set_xlabel('Time step')
-    axes[1].set_ylabel('MSE (estimate vs reference)')
+    axes[1].set_ylabel('Estimation error $\\|x_{true} - x_{est}\\|_2$')
     axes[1].set_yscale('log')
-    axes[1].set_title('MSE (Estimate vs Reference) vs Time')
+    axes[1].set_title('Estimation Error ($x_{true}$ vs $x_{est}$) vs Time')
     axes[1].legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
     axes[1].grid(True, alpha=0.3, which='both')
     plt.tight_layout(rect=[0, 0, 0.85, 1])
-    plt.savefig(os.path.join(sim_perf_dir, 'tracking_estimation_variance_and_mse.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(sim_perf_dir, 'tracking_estimation_variance_and_error.png'), dpi=150, bbox_inches='tight')
+
+# (2b) Separate plot: tracking error between estimated state and reference/goal state
+if 'mse_est_goal_mean' in results[FILTER_KEYS[0]]:
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    for filter_key in FILTER_KEYS:
+        t = np.arange(len(results[filter_key]['mse_est_goal_mean']))
+        mu_mse = results[filter_key]['mse_est_goal_mean']
+        std_mse = results[filter_key].get('mse_est_goal_std', np.zeros_like(mu_mse))
+        mu_plot = np.maximum(mu_mse, 1e-10)
+        lo = np.maximum(mu_mse - std_mse, 1e-10)
+        hi = np.maximum(mu_mse + std_mse, 1e-10)
+        ls = VAR_ERR_LINESTYLES.get(filter_key, '-')
+        ax.plot(mu_plot, color=PUBLICATION_COLORS.get(filter_key, 'gray'), lw=1.5, ls=ls, label=FILTER_LABELS[filter_key])
+        ax.fill_between(t, lo, hi, color=PUBLICATION_COLORS.get(filter_key, 'gray'), alpha=0.2)
+    ax.set_xlabel('Time step')
+    ax.set_ylabel('Tracking error $\\|x_{est} - x_{ref}\\|_2^2$')
+    ax.set_yscale('log')
+    ax.set_title('Tracking Error ($x_{est}$ vs $x_{ref}$) vs Time')
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), fontsize=9, frameon=True)
+    ax.grid(True, alpha=0.3, which='both')
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+    plt.savefig(os.path.join(sim_perf_dir, 'tracking_error_estimated_vs_reference.png'), dpi=150, bbox_inches='tight')
 # (3) Control effort (mean ± std) and running time (mean ± std total time per filter)
 if 'total_time_mean' in results[FILTER_KEYS[0]]:
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))

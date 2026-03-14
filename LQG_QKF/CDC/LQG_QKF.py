@@ -1062,9 +1062,9 @@ def test(H=1000, trials=20, plot=True, noise_scale=1e-1, m_scale=1e2, Q_scale=1.
         fig.suptitle('Estimation Performance Comparison', fontsize=24, y=0.98, fontweight='bold')
         
         # Error subplot
-        ax[0].set_title(f'Estimation Error, Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
+        ax[0].set_title(f'State Estimation Error Norm ($\\|x-\\hat{{x}}\\|_2$), Nonlinearity Scale = {int(m_scale)}', fontsize=20, fontweight='bold', pad=15)
         ax[0].set_xlabel('Time Step', fontsize=20, fontweight='bold')
-        ax[0].set_ylabel('Mean Squared Error', fontsize=20, fontweight='bold')
+        ax[0].set_ylabel('State Estimation Error Norm $\\|x-\\hat{x}\\|_2$', fontsize=20, fontweight='bold')
         ax[0].plot(err_list_ekf_avg, label='EKF', color=PUBLICATION_COLORS['ekf'], linewidth=2.5)
         ax[0].plot(err_list_ukf_avg, label='UKF', color=PUBLICATION_COLORS['ukf'], linewidth=2.5)
         ax[0].plot(err_list_qkf_num_avg, label='QKF(numeric)', color=PUBLICATION_COLORS['qkf_numeric'], linewidth=2.5)
