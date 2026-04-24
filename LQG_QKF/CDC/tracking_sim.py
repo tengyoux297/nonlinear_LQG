@@ -29,14 +29,16 @@ FILTER_CONFIGS = [
     ('qkf', 'aug_analytic'),
     ('qkf', 'aug_numeric'),
     ('pf', 'orig'),
+    ('ckf', 'orig'),
 ]
-FILTER_KEYS = ['ekf', 'ukf', 'qkf_analytic', 'qkf_numeric', 'pf']
+FILTER_KEYS = ['ekf', 'ukf', 'qkf_analytic', 'qkf_numeric', 'pf', 'ckf']
 FILTER_LABELS = {
     'ekf': 'LQG+EKF',
     'ukf': 'LQG+UKF',
     'qkf_analytic': 'LQG+QKF(analytic)',
     'qkf_numeric': 'LQG+QKF(numeric)',
     'pf': 'LQG+PF',
+    'ckf': 'LQG+CKF',
 }
 
 # ---------------------------------------------------------------------------
@@ -317,11 +319,12 @@ fig, ax = plt.subplots(figsize=(8, 7))
 # Line styles: QKF analytic dashed so it stays visible when overlapping QKF numeric
 # Distinct line style per path so overlapping trajectories stay distinguishable
 PATH_LINESTYLE = {
-    'ekf': '-',           # solid
-    'ukf': '--',          # dashed
-    'qkf_analytic': '-.', # dash-dot
-    'qkf_numeric': ':',   # dotted
-    'pf': (0, (3, 1, 1, 1)),  # dash-dot-dot
+    'ekf': '-',
+    'ukf': '--',
+    'qkf_analytic': '-.',
+    'qkf_numeric': ':',
+    'pf': (0, (3, 1, 1, 1)),
+    'ckf': (0, (5, 1)),
 }
 ax.plot(ref_path_mean[:, 0], ref_path_mean[:, 2], 'k-', lw=2, label='Reference (Figure-8)', zorder=5)
 for filter_key in FILTER_KEYS:
@@ -353,7 +356,7 @@ plt.close()
 
 # (2) Estimation variance (trace P) and estimation error vs time
 # Line styles so overlapping curves (e.g. QKF analytic vs numeric) stay distinguishable
-VAR_ERR_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1))}
+VAR_ERR_LINESTYLES = {'ekf': '-', 'ukf': '--', 'qkf_analytic': '-.', 'qkf_numeric': ':', 'pf': (0, (3, 1, 1, 1)), 'ckf': (0, (5, 1))}
 if 'estimation_variance_mean' in results[FILTER_KEYS[0]] and 'estimation_error_mean' in results[FILTER_KEYS[0]]:
     fig, axes = plt.subplots(2, 1, figsize=(8, 8))
     for filter_key in FILTER_KEYS:

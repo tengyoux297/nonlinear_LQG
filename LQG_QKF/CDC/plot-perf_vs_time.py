@@ -18,6 +18,7 @@ FILTER_INFO = {
     "qkf_analytic": ("tracking_qkf_analytic.pkl", "LQG+QKF(analytic)"),
     "qkf_numeric": ("tracking_qkf_numeric.pkl", "LQG+QKF(numeric)"),
     "pf": ("tracking_pf.pkl", "LQG+PF"),
+    "ckf": ("tracking_ckf.pkl", "LQG+CKF"),
 }
 
 
@@ -195,4 +196,3 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     make_accuracy_vs_time_plot(metric=args.metric)
-

@@ -6,7 +6,7 @@ base = r"D:\AC\UCLA\ECE\UCLA_LEMUR\nonlinear_LQG\LQG_QKF\CDC"
 
 print("SIM TEST")
 sim = os.path.join(base, "sim_test", "pkl")
-for k in ["ekf", "ukf", "qkf_analytic", "qkf_numeric", "pf"]:
+for k in ["ekf", "ukf", "qkf_analytic", "qkf_numeric", "pf", "ckf"]:
     with open(os.path.join(sim, f"tracking_{k}.pkl"), "rb") as f:
         d = pkl.load(f)
     mse = np.array(d.get("mse_est_goal_mean", []), dtype=float)
@@ -20,7 +20,7 @@ for k in ["ekf", "ukf", "qkf_analytic", "qkf_numeric", "pf"]:
 
 print("\nSIM TEST component breakdown from cache (est_path vs ref_path)")
 cache = os.path.join(base, "sim_test", "cache")
-for k in ["ekf", "ukf", "qkf_analytic", "qkf_numeric", "pf"]:
+for k in ["ekf", "ukf", "qkf_analytic", "qkf_numeric", "pf", "ckf"]:
     pos_mse = []
     vel_mse = []
     total_mse = []
@@ -50,6 +50,7 @@ mp = {
     "qkf_analytic": "qkf_analytic_results-mscale=100.pkl",
     "qkf_numeric": "qkf_results-mscale=100.pkl",
     "pf": "pf_results-mscale=100.pkl",
+    "ckf": "ckf_results-mscale=100.pkl",
 }
 for k, fn in mp.items():
     with open(os.path.join(pre, fn), "rb") as f:
